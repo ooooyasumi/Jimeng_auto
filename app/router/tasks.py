@@ -13,7 +13,7 @@ def row_to_task(row) -> TaskResponse:
     if row is None:
         return None
     params = json.loads(row["params"] or "{}")
-    refs = json.loads(row["references"] or "[]")
+    refs = json.loads(row["refs"] or "[]")
     return TaskResponse(
         id=row["id"],
         type=row["type"],
@@ -67,7 +67,7 @@ def create_task(req: TaskCreate):
     db = get_db()
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM tasks").fetchone()[0]
     cur = db.execute(
-        """INSERT INTO tasks (type, status, prompt, params, references, position)
+        """INSERT INTO tasks (type, status, prompt, params, refs, position)
            VALUES (?, 'pending', ?, ?, ?, ?)""",
         (task_type, req.prompt, params_json, refs_json, max_pos)
     )
@@ -115,7 +115,7 @@ def update_task(task_id: int, req: TaskUpdate):
     if req.references is not None:
         task_type = determine_task_type(req.references)
         updates["type"] = task_type
-        updates["references"] = json.dumps([r.model_dump() for r in req.references], ensure_ascii=False)
+        updates["refs"] = json.dumps([r.model_dump() for r in req.references], ensure_ascii=False)
 
     if updates:
         updates["updated_at"] = "datetime('now')"

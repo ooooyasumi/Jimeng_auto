@@ -24,7 +24,7 @@ def init_db():
             status          TEXT NOT NULL DEFAULT 'pending',
             prompt          TEXT NOT NULL DEFAULT '',
             params          TEXT NOT NULL DEFAULT '{}',
-            references      TEXT NOT NULL DEFAULT '[]',
+            refs            TEXT NOT NULL DEFAULT '[]',
             submit_id       TEXT,
             result_url      TEXT,
             gen_status      TEXT,

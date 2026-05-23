@@ -31,7 +31,7 @@ def set_worker_paused(paused: bool):
 async def submit_task_to_dreamina(task) -> str | None:
     """Submit a task to dreamina CLI. Returns submit_id or None."""
     params = json.loads(task["params"] or "{}")
-    refs = json.loads(task["references"] or "[]")
+    refs = json.loads(task["refs"] or "[]")
 
     tmp_dir = None
     ref_files = []
