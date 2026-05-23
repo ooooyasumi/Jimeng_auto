@@ -83,6 +83,12 @@ function rawCosUrl(cosUrlOrKey: string): string {
   return `https://jimengauto-1372876299.cos.ap-chongqing.myqcloud.com/${cosUrlOrKey}`;
 }
 
+function calcTaskCost(duration: number, modelVersion: string, refs: { type: string }[]): number {
+  const hasVideo = refs.some(r => r.type === "video");
+  if (modelVersion === "seedance2.0") return hasVideo ? duration * 16 : duration * 8;
+  return hasVideo ? duration * 10 : duration * 5;
+}
+
 export default function MainPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -113,6 +119,16 @@ export default function MainPage() {
   const hasRefs = refs.length > 0;
   const isUploading = uploading.size > 0;
   const modeLabel = hasRefs || isUploading ? "全能参考 (multimodal2video)" : "文生视频 (text2video)";
+
+  // Estimated credit cost
+  const estimatedCost = (() => {
+    const hasVideoRef = refs.some(r => r.type === "video");
+    if (modelVersion === "seedance2.0") {
+      return hasVideoRef ? duration * 16 : duration * 8;
+    }
+    // seedance2.0fast (default)
+    return hasVideoRef ? duration * 10 : duration * 5;
+  })();
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
@@ -362,6 +378,7 @@ export default function MainPage() {
                 {prompt.length}/{MAX_PROMPT_LENGTH}
               </span>
             )}
+            <span className="cost-badge">✦ {estimatedCost}</span>
             <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading || prompt.length > MAX_PROMPT_LENGTH}>
               {isUploading ? `上传中 ${overallProgress}%` : submitting ? "提交中..." : "加入队列"}
             </button>
@@ -560,7 +577,7 @@ function TaskCard({
         <span className={`status-badge ${sc}`}><span className={`status-dot ${task.status === "running" ? "status-dot--running" : ""}`}></span>{sl}</span>
         {isPending && <span className="task-card__drag-hint" title="长按拖拽排序">⠿</span>}
         <span className="task-card__time">{formatTime(task.created_at)}</span>
-        <span className="task-card__cost">{isPending ? "预计 " : ""}-15 积分</span>
+        <span className="task-card__cost">{isPending ? "预计 " : ""}-{calcTaskCost(task.params.duration, task.params.model_version, task.references || [])} 积分</span>
         {task.status === "done" && task.result_url && <a className="task-card__link" href={task.result_url} target="_blank" rel="noopener noreferrer">↗ 在即梦查看</a>}
         {isPending && <div className="task-card__actions"><button className="task-card__action-btn task-card__action-btn--danger" onClick={() => onDelete?.(task.id)}>删除</button></div>}
       </div>

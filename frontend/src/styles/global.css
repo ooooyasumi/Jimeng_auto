@@ -584,6 +584,13 @@ body {
   opacity: 0.6;
 }
 .uploaded-file__remove:hover { opacity: 1; color: var(--danger); }
+.cost-badge {
+  font-size: 11px;
+  color: var(--warning);
+  white-space: nowrap;
+  align-self: center;
+}
+
 .submit-btn {
   background: var(--accent);
   color: #000;
