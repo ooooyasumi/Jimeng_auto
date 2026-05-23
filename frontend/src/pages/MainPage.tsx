@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   fetchTasks, fetchQueueStatus, fetchCredit,
   deleteTask, reorderTask, pauseQueue, resumeQueue,
@@ -97,6 +97,8 @@ export default function MainPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
+  // Local pending order for instant visual feedback on drop
+  const [pendingOrder, setPendingOrder] = useState<number[]>([]);
 
   // Upload progress: filename -> {file, progress}
   const [uploading, setUploading] = useState<Map<string, UploadEntry>>(new Map());
@@ -138,6 +140,7 @@ export default function MainPage() {
     try {
       const [td, qs, cd] = await Promise.all([fetchTasks(), fetchQueueStatus(), fetchCredit()]);
       setTasks(td); setQueueStatus(qs);
+      setPendingOrder([]); // sync with server order
       if (cd?.total_credit) setCredit(cd.total_credit);
       setLastRefresh(new Date());
     } catch (err) { console.error("Refresh failed", err); }
@@ -241,11 +244,9 @@ export default function MainPage() {
     textareaRef.current?.focus();
   }
 
-  const filteredMentions = useMemo(() => {
-    const ready = refs;
-    if (!mentionFilter) return ready;
-    return ready.filter(r => r.filename.toLowerCase().includes(mentionFilter));
-  }, [refs, mentionFilter]);
+  const filteredMentions = mentionFilter
+    ? refs.filter(r => r.filename.toLowerCase().includes(mentionFilter))
+    : refs;
 
   // ===== Submit =====
   async function handleSubmit() {
@@ -263,7 +264,7 @@ export default function MainPage() {
   async function handleReorder(id: number, pos: number) { try { await reorderTask(id, pos); refresh(); } catch (e: any) { showToast(e.message); } }
   async function handlePauseResume() { try { queueStatus?.paused ? await resumeQueue() : await pauseQueue(); refresh(); } catch (e: any) { showToast(e.message); } }
 
-  // Drag: reorder pending list locally then persist
+  // Drag: visual feedback via CSS classes only, no list reorder during drag
   function handleDragStart(e: React.DragEvent, taskId: number) { setDragId(taskId); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(taskId)); }
   function handleDragEnd() { setDragId(null); setDragOverId(null); }
   function handleDragOver(e: React.DragEvent, taskId: number) {
@@ -276,21 +277,24 @@ export default function MainPage() {
   function handleDrop(e: React.DragEvent, targetTask: Task) {
     e.preventDefault(); setDragId(null); setDragOverId(null);
     const dId = Number(e.dataTransfer.getData("text/plain"));
-    if (dId && dId !== targetTask.id) handleReorder(dId, targetTask.position);
+    if (!dId || dId === targetTask.id) return;
+    // Instant local swap for visual feedback
+    const ids = pendingOrder.length > 0 ? [...pendingOrder] : pendingTasksBase.map(t => t.id);
+    const fromIdx = ids.indexOf(dId);
+    const toIdx = ids.indexOf(targetTask.id);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      ids.splice(fromIdx, 1); ids.splice(toIdx, 0, dId); setPendingOrder(ids);
+    }
+    handleReorder(dId, targetTask.position).finally(() => refresh());
   }
 
-  // Build ordered pending list with drag-insertion for visual feedback
-  const orderedPending = useMemo(() => {
-    const base = tasks.filter(t => t.status === "pending").sort((a, b) => a.position - b.position);
-    if (!dragId || !dragOverId || dragId === dragOverId) return base;
-    const from = base.findIndex(t => t.id === dragId);
-    const to = base.findIndex(t => t.id === dragOverId);
-    if (from === -1 || to === -1) return base;
-    const reordered = [...base];
-    const [item] = reordered.splice(from, 1);
-    reordered.splice(to, 0, item);
-    return reordered;
-  }, [tasks, dragId, dragOverId]);
+  // Base pending order from server, overridden by local pendingOrder if set
+  const pendingTasksBase = tasks.filter(t => t.status === "pending").sort((a, b) => a.position - b.position);
+  const orderedPending = (() => {
+    if (pendingOrder.length === 0) return pendingTasksBase;
+    const map = new Map(pendingTasksBase.map(t => [t.id, t]));
+    return pendingOrder.map(id => map.get(id)).filter(Boolean) as Task[];
+  })();
 
   const sortedDone = tasks.filter(t => t.status === "done" || t.status === "failed").sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   // orderedPending is defined above with drag-insertion logic

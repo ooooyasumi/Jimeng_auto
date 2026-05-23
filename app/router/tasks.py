@@ -65,7 +65,7 @@ def create_task(req: TaskCreate):
     params_json = json.dumps(params.model_dump(), ensure_ascii=False)
 
     db = get_db()
-    max_pos = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM tasks").fetchone()[0]
+    max_pos = db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'pending'").fetchone()[0]
     cur = db.execute(
         """INSERT INTO tasks (type, status, prompt, params, refs, position)
            VALUES (?, 'pending', ?, ?, ?, ?)""",
@@ -170,6 +170,9 @@ def reorder_task(task_id: int, req: ReorderRequest):
             (new_pos, old_pos)
         )
     db.execute("UPDATE tasks SET position = ?, updated_at = datetime('now') WHERE id = ?", (new_pos, task_id))
+    # Renumber all pending tasks to keep positions continuous
+    for i, row in enumerate(db.execute("SELECT id FROM tasks WHERE status = 'pending' ORDER BY position ASC").fetchall()):
+        db.execute("UPDATE tasks SET position = ? WHERE id = ?", (i, row["id"]))
     db.commit()
     db.close()
     return {"ok": True}
