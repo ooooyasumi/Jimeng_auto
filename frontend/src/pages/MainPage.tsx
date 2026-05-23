@@ -75,6 +75,8 @@ export default function MainPage() {
   const [showMention, setShowMention] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [previewRef, setPreviewRef] = useState<Reference | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -84,13 +86,17 @@ export default function MainPage() {
   const isUploading = uploading.size > 0;
   const modeLabel = hasRefs || isUploading ? "全能参考 (multimodal2video)" : "文生视频 (text2video)";
 
-  const refresh = useCallback(async () => {
+  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
+
+  const refresh = useCallback(async (animate = false) => {
+    if (animate) setRefreshing(true);
     try {
       const [td, qs, cd] = await Promise.all([fetchTasks(), fetchQueueStatus(), fetchCredit()]);
       setTasks(td); setQueueStatus(qs);
       if (cd?.total_credit) setCredit(cd.total_credit);
       setLastRefresh(new Date());
     } catch (err) { console.error("Refresh failed", err); }
+    if (animate) setTimeout(() => setRefreshing(false), 600);
   }, []);
 
   useEffect(() => { refresh(); const t = setInterval(refresh, REFRESH_INTERVAL * 1000); return () => clearInterval(t); }, [refresh]);
@@ -112,7 +118,7 @@ export default function MainPage() {
     const arr = Array.from(files);
     for (const file of arr) {
       const err = validateFile(file, refs, uploading.size);
-      if (err) { alert(err); continue; }
+      if (err) { showToast(err); continue; }
       // Mark as uploading
       setUploading(prev => {
         const next = new Map(prev);
@@ -141,7 +147,7 @@ export default function MainPage() {
       const type = detectType(file.name);
       setRefs(prev => [...prev, { type, cos_url, filename: file.name }]);
     } catch (err: any) {
-      alert(`${file.name} 上传失败: ${err.message}`);
+      showToast(`${file.name} 上传失败: ${err.message}`);
     } finally {
       setUploading(prev => { const n = new Map(prev); n.delete(file.name); return n; });
     }
@@ -199,13 +205,13 @@ export default function MainPage() {
     try {
       await createTask({ prompt: prompt.trim(), duration, ratio, model_version: modelVersion, references: refs });
       setPrompt(""); setRefs([]); setShowMention(false); refresh();
-    } catch (err: any) { alert(err.message || "提交失败"); }
+    } catch (err: any) { showToast(err.message || "提交失败"); }
     finally { setSubmitting(false); }
   }
 
-  async function handleDelete(id: number) { try { await deleteTask(id); refresh(); } catch (e: any) { alert(e.message); } }
-  async function handleReorder(id: number, pos: number) { try { await reorderTask(id, pos); refresh(); } catch (e: any) { alert(e.message); } }
-  async function handlePauseResume() { try { queueStatus?.paused ? await resumeQueue() : await pauseQueue(); refresh(); } catch (e: any) { alert(e.message); } }
+  async function handleDelete(id: number) { try { await deleteTask(id); refresh(); } catch (e: any) { showToast(e.message); } }
+  async function handleReorder(id: number, pos: number) { try { await reorderTask(id, pos); refresh(); } catch (e: any) { showToast(e.message); } }
+  async function handlePauseResume() { try { queueStatus?.paused ? await resumeQueue() : await pauseQueue(); refresh(); } catch (e: any) { showToast(e.message); } }
 
   function handleDragStart(e: React.DragEvent, taskId: number) { setDragId(taskId); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(taskId)); (e.currentTarget as HTMLElement).classList.add("task-card--dragging"); }
   function handleDragEnd(e: React.DragEvent) { setDragId(null); (e.currentTarget as HTMLElement).classList.remove("task-card--dragging"); }
@@ -227,6 +233,7 @@ export default function MainPage() {
   return (
     <>
       {previewRef && <FilePreview refData={previewRef} onClose={() => setPreviewRef(null)} />}
+      {toast && <div className="toast">{toast}</div>}
 
       <div className="topbar">
         <div className="topbar__inner container">
@@ -243,7 +250,7 @@ export default function MainPage() {
                 <span className="topbar__refresh-tooltip">数据每 {REFRESH_INTERVAL} 秒自动刷新</span>
               </span>
             )}
-            <button className="topbar__btn topbar__refresh-btn" onClick={refresh} title="立即刷新">↻ 刷新</button>
+            <button className={`topbar__btn topbar__refresh-btn ${refreshing ? "topbar__refresh-btn--spin" : ""}`} onClick={() => refresh(true)} title="立即刷新">↻ 刷新</button>
             {credit !== null && <span className="topbar__credit">✦ {credit.toLocaleString()} 积分</span>}
             <button className="topbar__btn" onClick={() => { localStorage.removeItem("token"); window.location.reload(); }}>退出</button>
           </div>

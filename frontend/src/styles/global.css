@@ -617,6 +617,38 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ===== Toast ===== */
+.toast {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 8px 20px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  z-index: 500;
+  animation: toast-in 0.25s ease-out;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Refresh button spin */
+.topbar__refresh-btn--spin {
+  pointer-events: none;
+  opacity: 0.6;
+}
+.topbar__refresh-btn--spin::before {
+  content: "↻";
+  display: inline-block;
+  animation: spin 0.5s ease-in-out;
+}
+
 /* ===== Prompt wrapper & mention popup ===== */
 .bottom-bar__prompt-wrapper {
   flex: 1;
