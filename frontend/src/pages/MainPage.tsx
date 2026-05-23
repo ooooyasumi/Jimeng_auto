@@ -376,6 +376,7 @@ export default function MainPage() {
           {/* Row 2: all controls */}
           <div className="bottom-bar__controls">
             <div className="bottom-bar__upload" onClick={() => fileInputRef.current?.click()} title="上传参考文件（也支持拖拽/粘贴）">+</div>
+            <div className={`mode-hint ${(hasRefs || isUploading) ? "mode-hint--multimodal" : "mode-hint--text2video"}`}>模式: <span>{modeLabel}</span></div>
             <Dropdown label="模型" value={modelVersion} onChange={setModelVersion}
               options={[
                 { value: "seedance2.0fast", label: "Seedance 2.0 Fast", icon: "https://p26-dreamina-sign.byteimg.com/tos-cn-i-tb4s082cfz/sd20_avg~tplv-tb4s082cfz-image.image?lk3s=8e790bc3&x-expires=1811042195&x-signature=K%2BiRclxpFfQIvRfh8yJsCHgoP10%3D" },
@@ -401,7 +402,6 @@ export default function MainPage() {
             <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading || prompt.length > MAX_PROMPT_LENGTH}>
               {isUploading ? `上传中 ${overallProgress}%` : submitting ? "提交中..." : "加入队列"}
             </button>
-            <div className={`mode-hint ${(hasRefs || isUploading) ? "mode-hint--multimodal" : "mode-hint--text2video"}`}>模式: <span>{modeLabel}</span></div>
           </div>
         </div>
       </div>

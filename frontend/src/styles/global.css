@@ -362,7 +362,7 @@ body {
   min-height: 40px;
   max-height: 200px;
   line-height: 1.5;
-  overflow-y: auto;
+  overflow-y: hidden;
 }
 .bottom-bar__prompt:focus { border-color: var(--accent); }
 .bottom-bar__prompt::placeholder { color: var(--text-secondary); }
