@@ -27,22 +27,49 @@ function detectType(filename: string): Reference["type"] {
   return "image";
 }
 
-function validateFile(file: File, existingRefs: Reference[], uploadingCount: number): string | null {
-  const type = detectType(file.name);
-  const limit = FILE_LIMITS[type];
-  if (file.size > limit.maxSize) {
-    return `${file.name} 超过 ${limit.label} 限制 (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
-  }
+function validateFileCounts(type: Reference["type"], existingRefs: Reference[], uploadingCount: number): string | null {
   const counts = { image: 0, video: 0, audio: 0 };
   for (const r of existingRefs) counts[r.type]++;
   counts[type]++;
   if (counts.image + (type === "image" ? uploadingCount : 0) > MAX_IMAGE_COUNT) return `图片最多 ${MAX_IMAGE_COUNT} 张`;
   if (counts.video + (type === "video" ? uploadingCount : 0) > MAX_VIDEO_COUNT) return `视频最多 ${MAX_VIDEO_COUNT} 个`;
   if (counts.audio + (type === "audio" ? uploadingCount : 0) > MAX_AUDIO_COUNT) return `音频最多 ${MAX_AUDIO_COUNT} 个`;
-  if (type === "audio") {
-    return `音频需控制在 2-15 秒内，请确认 ${file.name} 符合要求`;
+  return null;
+}
+
+async function validateFile(file: File, existingRefs: Reference[], uploadingCount: number): Promise<string | null> {
+  const type = detectType(file.name);
+  const limit = FILE_LIMITS[type];
+  if (file.size > limit.maxSize) {
+    return `${file.name} 超过 ${limit.label} 限制 (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+  }
+  const countErr = validateFileCounts(type, existingRefs, uploadingCount);
+  if (countErr) return countErr;
+
+  // Check duration for video/audio
+  if (type === "video" || type === "audio") {
+    const minDur = type === "audio" ? 2 : 4;
+    const maxDur = 15;
+    try {
+      const dur = await getMediaDuration(file, type);
+      if (dur < minDur) return `${file.name} 时长 ${dur.toFixed(1)}s, 需 ≥ ${minDur}s`;
+      if (dur > maxDur) return `${file.name} 时长 ${dur.toFixed(1)}s, 需 ≤ ${maxDur}s`;
+    } catch {
+      return `无法读取 ${file.name} 的时长，文件可能已损坏`;
+    }
   }
   return null;
+}
+
+function getMediaDuration(file: File, type: "video" | "audio"): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const el = document.createElement(type);
+    el.preload = "metadata";
+    el.onloadedmetadata = () => { URL.revokeObjectURL(url); resolve(el.duration); };
+    el.onerror = () => { URL.revokeObjectURL(url); reject(new Error("load failed")); };
+    el.src = url;
+  });
 }
 
 // Build the raw COS URL (standard domain) from custom domain URL or key
@@ -115,10 +142,10 @@ export default function MainPage() {
   }, [refs, uploading]);
 
   // ===== Upload with XHR progress =====
-  function startUploads(files: FileList | File[]) {
+  async function startUploads(files: FileList | File[]) {
     const arr = Array.from(files);
     for (const file of arr) {
-      const err = validateFile(file, refs, uploading.size);
+      const err = await validateFile(file, refs, uploading.size);
       if (err) { showToast(err); continue; }
       // Mark as uploading
       setUploading(prev => {
