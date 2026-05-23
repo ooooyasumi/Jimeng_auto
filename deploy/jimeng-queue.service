@@ -1,0 +1,21 @@
+[Unit]
+Description=即梦视频生成队列后端
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/jimeng-queue
+Environment="PASSWORD=change-me"
+Environment="JWT_SECRET=change-me-to-a-random-string"
+Environment="POLL_INTERVAL=30"
+Environment="COS_REGION="
+Environment="COS_BUCKET="
+Environment="COS_SECRET_ID="
+Environment="COS_SECRET_KEY="
+ExecStart=/opt/jimeng-queue/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

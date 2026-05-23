@@ -1,0 +1,34 @@
+# Document & Reference
+DOCUMENT/
+document/
+REFERENCE/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+venv/
+.venv/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+
+# Database
+data/*.db
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dreamina CLI state (don't commit login tokens)
+.dreamina_cli/
