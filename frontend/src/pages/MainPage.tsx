@@ -243,6 +243,7 @@ export default function MainPage() {
                 <span className="topbar__refresh-tooltip">数据每 {REFRESH_INTERVAL} 秒自动刷新</span>
               </span>
             )}
+            <button className="topbar__btn topbar__refresh-btn" onClick={refresh} title="立即刷新">↻ 刷新</button>
             {credit !== null && <span className="topbar__credit">✦ {credit.toLocaleString()} 积分</span>}
             <button className="topbar__btn" onClick={() => { localStorage.removeItem("token"); window.location.reload(); }}>退出</button>
           </div>
@@ -346,6 +347,20 @@ export default function MainPage() {
   );
 }
 
+// ===== Ratio preview icon =====
+function RatioPreview({ w, h }: { w: number; h: number }) {
+  const BOX = 18; // outer box size in px
+  const PAD = 2;  // padding inside the box
+  const maxDim = Math.max(w, h);
+  const iw = Math.round((w / maxDim) * (BOX - PAD * 2));
+  const ih = Math.round((h / maxDim) * (BOX - PAD * 2));
+  return (
+    <span className="ratio-preview">
+      <span className="ratio-preview__inner" style={{ width: iw, height: ih }} />
+    </span>
+  );
+}
+
 // ===== Custom Dropdown =====
 function Dropdown({ label, value, onChange, options }: {
   label: string; value: string; onChange: (v: string) => void;
@@ -366,7 +381,7 @@ function Dropdown({ label, value, onChange, options }: {
       <span className="control-label">{label}</span>
       <div className={`dropdown-trigger ${open ? "dropdown-trigger--open" : ""}`} onClick={() => setOpen(!open)}>
         {selected.ratioW != null && selected.ratioH != null && (
-          <span className="ratio-preview" style={{ width: Math.min(selected.ratioW * 4, 36), height: Math.min(selected.ratioH * 4, 36) }}></span>
+          <RatioPreview w={selected.ratioW} h={selected.ratioH} />
         )}
         <span>{selected.label}</span>
         <span className="dropdown-arrow">▾</span>
@@ -378,7 +393,7 @@ function Dropdown({ label, value, onChange, options }: {
               className={`dropdown-item ${o.value === value ? "dropdown-item--active" : ""}`}
               onClick={() => { onChange(o.value); setOpen(false); }}>
               {o.ratioW != null && o.ratioH != null && (
-                <span className="ratio-preview" style={{ width: Math.min(o.ratioW * 3, 24), height: Math.min(o.ratioH * 3, 24) }}></span>
+                <RatioPreview w={o.ratioW} h={o.ratioH} />
               )}
               {o.label}
             </div>
