@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   fetchTasks,
   fetchQueueStatus,
@@ -10,11 +10,9 @@ import {
   createTask,
   getPresignedUpload,
 } from "../api";
-import type {
-  Task,
-  QueueStatus,
-  Reference,
-} from "../api";
+import type { Task, QueueStatus, Reference } from "../api";
+
+const REFRESH_INTERVAL = 15; // seconds
 
 export default function MainPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -31,7 +29,15 @@ export default function MainPage() {
   const [modelVersion, setModelVersion] = useState("seedance2.0fast");
   const [submitting, setSubmitting] = useState(false);
 
+  // @ mention state
+  const [showMention, setShowMention] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState("");
+  // Preview state
+  const [previewRef, setPreviewRef] = useState<Reference | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const bottomBarRef = useRef<HTMLDivElement>(null);
 
   const hasRefs = refs.length > 0;
   const modeLabel = hasRefs ? "全能参考 (multimodal2video)" : "文生视频 (text2video)";
@@ -54,35 +60,15 @@ export default function MainPage() {
 
   useEffect(() => {
     refresh();
-    const timer = setInterval(refresh, 15000);
+    const timer = setInterval(refresh, REFRESH_INTERVAL * 1000);
     return () => clearInterval(timer);
   }, [refresh]);
 
-  async function handleSubmit() {
-    if (!prompt.trim()) return;
-    setSubmitting(true);
-    try {
-      await createTask({
-        prompt: prompt.trim(),
-        duration,
-        ratio,
-        model_version: modelVersion,
-        references: refs,
-      });
-      setPrompt("");
-      setRefs([]);
-      refresh();
-    } catch (err: any) {
-      alert(err.message || "提交失败");
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  // ===== Upload helpers =====
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    for (const file of Array.from(files)) {
+  async function uploadFiles(files: FileList | File[]) {
+    const arr = Array.from(files);
+    for (const file of arr) {
       try {
         const { upload_url, cos_url } = await getPresignedUpload(file.name);
         await fetch(upload_url, {
@@ -98,10 +84,107 @@ export default function MainPage() {
           : "image";
         setRefs(prev => [...prev, { type, cos_url, filename: file.name }]);
       } catch (err: any) {
-        alert(`上传 ${file.name} 失败: ${err.message}`);
+        alert(`${file.name} 上传失败: ${err.message}`);
       }
     }
+  }
+
+  async function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files.length > 0) {
+      await uploadFiles(e.target.files);
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  // Drag file upload to bottom bar
+  function handleFileDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleFileDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      uploadFiles(e.dataTransfer.files);
+    }
+  }
+
+  // Paste upload
+  function handlePaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      uploadFiles(files);
+    }
+  }
+
+  // ===== @ mention =====
+
+  function handlePromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    setPrompt(value);
+
+    // Detect @ trigger
+    const cursorPos = e.target.selectionStart || 0;
+    const textBefore = value.slice(0, cursorPos);
+    const atMatch = textBefore.match(/@([^\s@]*)$/);
+
+    if (atMatch && refs.length > 0) {
+      setMentionFilter(atMatch[1].toLowerCase());
+      setShowMention(true);
+    } else {
+      setShowMention(false);
+    }
+  }
+
+  function insertMention(ref: Reference) {
+    const cursorPos = textareaRef.current?.selectionStart || prompt.length;
+    const textBefore = prompt.slice(0, cursorPos);
+    const textAfter = prompt.slice(cursorPos);
+    const atIdx = textBefore.lastIndexOf("@");
+    const newPrompt = textBefore.slice(0, atIdx) + ref.filename + " " + textAfter;
+    setPrompt(newPrompt);
+    setShowMention(false);
+    textareaRef.current?.focus();
+  }
+
+  const filteredMentions = useMemo(() => {
+    if (!mentionFilter) return refs;
+    return refs.filter(r => r.filename.toLowerCase().includes(mentionFilter));
+  }, [refs, mentionFilter]);
+
+  // ===== Submit =====
+
+  async function handleSubmit() {
+    if (!prompt.trim()) return;
+    setSubmitting(true);
+    try {
+      await createTask({
+        prompt: prompt.trim(),
+        duration,
+        ratio,
+        model_version: modelVersion,
+        references: refs,
+      });
+      setPrompt("");
+      setRefs([]);
+      setShowMention(false);
+      refresh();
+    } catch (err: any) {
+      alert(err.message || "提交失败");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function removeRef(index: number) {
@@ -139,7 +222,7 @@ export default function MainPage() {
     }
   }
 
-  // Drag handlers
+  // Task drag handlers
   function handleDragStart(e: React.DragEvent, taskId: number) {
     setDragId(taskId);
     e.dataTransfer.effectAllowed = "move";
@@ -156,8 +239,7 @@ export default function MainPage() {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     if (dragId !== null && dragId !== taskId) {
-      const target = e.currentTarget as HTMLElement;
-      target.classList.add("task-card--drag-over");
+      (e.currentTarget as HTMLElement).classList.add("task-card--drag-over");
     }
   }
 
@@ -194,17 +276,21 @@ export default function MainPage() {
     return `${Math.floor(hours / 24)} 天前`;
   }
 
-  function refIcon(type: string) {
+  function refIconEmoji(type: string) {
     switch (type) {
-      case "image": return "IMG";
-      case "video": return "VID";
-      case "audio": return "AUD";
+      case "image": return "🖼";
+      case "video": return "🎬";
+      case "audio": return "🎵";
       default: return "?";
     }
   }
 
   return (
     <>
+      {previewRef && (
+        <FilePreview refData={previewRef} onClose={() => setPreviewRef(null)} />
+      )}
+
       {/* Top Bar */}
       <div className="topbar">
         <div className="topbar__inner container">
@@ -216,8 +302,12 @@ export default function MainPage() {
           </div>
           <div className="topbar__right">
             {lastRefresh && (
-              <span className="topbar__refresh" title="每 15 秒自动刷新">
-                {lastRefresh.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              <span className="topbar__refresh">
+                更新时间:
+                <span className="topbar__refresh-time">
+                  {lastRefresh.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+                <span className="topbar__refresh-tooltip">数据每 {REFRESH_INTERVAL} 秒自动刷新</span>
               </span>
             )}
             {credit !== null && <span className="topbar__credit">✦ {credit.toLocaleString()} 积分</span>}
@@ -237,36 +327,22 @@ export default function MainPage() {
           </div>
 
           {queueStatus?.running && (
-            <TaskCard
-              task={queueStatus.running}
-              isActive
-              formatTime={formatTime}
-              refIcon={refIcon}
-            />
+            <TaskCard task={queueStatus.running} isActive formatTime={formatTime} />
           )}
 
           {sortedDone.map(task => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              formatTime={formatTime}
-              refIcon={refIcon}
-            />
+            <TaskCard key={task.id} task={task} formatTime={formatTime} />
           ))}
 
           {!queueStatus?.running && sortedDone.length === 0 && (
             <div className="empty-state">暂无任务，在下方输入 prompt 开始</div>
           )}
 
-          {/* Pending queue section */}
+          {/* Pending section */}
           <div className="section-header" style={{ marginTop: 8 }}>
             排队中 ({pendingTasks.length})
             <span className="section-header__line"></span>
-            <button
-              className="topbar__btn"
-              onClick={handlePauseResume}
-              style={{ fontSize: 11, marginLeft: "auto" }}
-            >
+            <button className="topbar__btn" onClick={handlePauseResume} style={{ fontSize: 11, marginLeft: "auto" }}>
               {queueStatus?.paused ? "▶ 恢复队列" : "⏸ 暂停队列"}
             </button>
           </div>
@@ -278,7 +354,7 @@ export default function MainPage() {
               isPending
               draggable
               formatTime={formatTime}
-              refIcon={refIcon}
+             
               onDelete={handleDelete}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
@@ -297,47 +373,87 @@ export default function MainPage() {
       </div>
 
       {/* Bottom Input Area */}
-      <div className="bottom-bar">
+      <div
+        className="bottom-bar"
+        ref={bottomBarRef}
+        onDragOver={handleFileDragOver}
+        onDrop={handleFileDrop}
+        onPaste={handlePaste}
+      >
         <div className="bottom-bar__inner container">
+          {/* Uploaded files bar */}
           {refs.length > 0 && (
             <div className="uploaded-files">
               {refs.map((ref, i) => (
-                <span key={i} className="uploaded-file">
-                  [{refIcon(ref.type)}] {ref.filename}
-                  <span className="uploaded-file__remove" onClick={() => removeRef(i)}>×</span>
+                <span
+                  key={i}
+                  className="uploaded-file"
+                  onClick={() => setPreviewRef(ref)}
+                  title="点击预览"
+                >
+                  {refIconEmoji(ref.type)} {ref.filename}
+                  <span className="uploaded-file__remove" onClick={(e) => { e.stopPropagation(); removeRef(i); }}>×</span>
                 </span>
               ))}
             </div>
           )}
 
+          {/* Prompt input row */}
           <div className="bottom-bar__input-row">
-            <textarea
-              className="bottom-bar__prompt"
-              placeholder="描述你想生成的视频内容..."
-              rows={1}
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit();
-                }
-              }}
-            />
+            <div className="bottom-bar__prompt-wrapper">
+              <textarea
+                ref={textareaRef}
+                className="bottom-bar__prompt"
+                placeholder="描述你想生成的视频内容... 输入 @ 引用已上传文件，支持拖拽/粘贴上传"
+                rows={1}
+                value={prompt}
+                onChange={handlePromptChange}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !e.shiftKey && !showMention) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                  if (e.key === "Escape" && showMention) {
+                    setShowMention(false);
+                  }
+                }}
+              />
+              {/* @ mention popup */}
+              {showMention && (
+                <div className="mention-popup">
+                  {filteredMentions.length === 0 ? (
+                    <div className="mention-popup__empty">无匹配文件</div>
+                  ) : (
+                    filteredMentions.map((ref, i) => (
+                      <div
+                        key={i}
+                        className="mention-popup__item"
+                        onClick={() => insertMention(ref)}
+                      >
+                        <span className="mention-popup__icon">{refIconEmoji(ref.type)}</span>
+                        <span className="mention-popup__name">{ref.filename}</span>
+                        <span className="mention-popup__type">{ref.type.toUpperCase()}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
             <input
               ref={fileInputRef}
               type="file"
               style={{ display: "none" }}
               multiple
               accept="image/*,video/*,audio/*"
-              onChange={handleUpload}
+              onChange={handleFileInput}
             />
-            <div className="bottom-bar__upload" onClick={() => fileInputRef.current?.click()} title="上传参考文件">+</div>
+            <div className="bottom-bar__upload" onClick={() => fileInputRef.current?.click()} title="上传参考文件（也支持拖拽/粘贴）">+</div>
             <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim()}>
               {submitting ? "提交中..." : "加入队列"}
             </button>
           </div>
 
+          {/* Controls row */}
           <div className="bottom-bar__controls">
             <div className="control-group">
               <span className="control-label">模型</span>
@@ -377,27 +493,41 @@ export default function MainPage() {
   );
 }
 
-// Task card component
+// ===== File Preview Modal =====
+function FilePreview({ refData, onClose }: { refData: Reference; onClose: () => void }) {
+  const isVideo = refData.type === "video";
+  const isAudio = refData.type === "audio";
+  const src = refData.cos_url;
+
+  return (
+    <div className="preview-overlay" onClick={onClose}>
+      <div className="preview-modal" onClick={e => e.stopPropagation()}>
+        <div className="preview-modal__header">
+          <span className="preview-modal__title">{refData.filename}</span>
+          <button className="preview-modal__close" onClick={onClose}>×</button>
+        </div>
+        <div className="preview-modal__body">
+          {isVideo ? (
+            <video src={src} controls autoPlay className="preview-media" />
+          ) : isAudio ? (
+            <audio src={src} controls autoPlay className="preview-audio" />
+          ) : (
+            <img src={src} alt={refData.filename} className="preview-media" />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== Task Card =====
 function TaskCard({
-  task,
-  isActive = false,
-  isPending = false,
-  draggable = false,
-  formatTime,
-  refIcon,
-  onDelete,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
+  task, isActive = false, isPending = false, draggable = false,
+  formatTime, onDelete,
+  onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
-  task: Task;
-  isActive?: boolean;
-  isPending?: boolean;
-  draggable?: boolean;
+  task: Task; isActive?: boolean; isPending?: boolean; draggable?: boolean;
   formatTime: (ts: string) => string;
-  refIcon: (type: string) => string;
   onDelete?: (id: number) => void;
   onDragStart?: (e: React.DragEvent, taskId: number) => void;
   onDragEnd?: (e: React.DragEvent) => void;
@@ -405,23 +535,21 @@ function TaskCard({
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent, task: Task) => void;
 }) {
-  const statusClass = task.status === "running"
-    ? "status-badge--running"
-    : task.status === "done"
-    ? "status-badge--done"
-    : task.status === "failed"
-    ? "status-badge--failed"
+  const statusClass =
+    task.status === "running" ? "status-badge--running"
+    : task.status === "done" ? "status-badge--done"
+    : task.status === "failed" ? "status-badge--failed"
     : "status-badge--pending";
 
-  const statusLabel = task.status === "running"
-    ? "生成中"
-    : task.status === "done"
-    ? "已完成"
-    : task.status === "failed"
-    ? "失败"
+  const statusLabel =
+    task.status === "running" ? "生成中"
+    : task.status === "done" ? "已完成"
+    : task.status === "failed" ? "失败"
     : `队列 #${task.position + 1}`;
 
   const typeLabel = task.type === "text2video" ? "文生视频" : "全能参考";
+
+  const refEmoji = (type: string) => type === "image" ? "🖼" : type === "video" ? "🎬" : "🎵";
 
   return (
     <div
@@ -461,7 +589,7 @@ function TaskCard({
         <div className="task-card__refs">
           {task.references.map((ref, i) => (
             <span key={i} className="task-card__ref">
-              [{refIcon(ref.type)}] {ref.filename}
+              {refEmoji(ref.type)} {ref.filename}
             </span>
           ))}
         </div>
