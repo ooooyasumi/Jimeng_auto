@@ -14,6 +14,40 @@ import type { Task, QueueStatus, Reference } from "../api";
 
 const REFRESH_INTERVAL = 15; // seconds
 
+const FILE_LIMITS: Record<string, { maxSize: number; label: string }> = {
+  image: { maxSize: 10 * 1024 * 1024, label: "10 MB" },
+  video: { maxSize: 200 * 1024 * 1024, label: "200 MB" },
+  audio: { maxSize: 10 * 1024 * 1024, label: "10 MB" },
+};
+const MAX_IMAGE_COUNT = 9;
+const MAX_VIDEO_COUNT = 3;
+const MAX_AUDIO_COUNT = 3;
+
+function detectType(filename: string): Reference["type"] {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  if (["mp4", "mov", "webm", "avi"].includes(ext)) return "video";
+  if (["mp3", "wav", "aac", "m4a", "ogg"].includes(ext)) return "audio";
+  return "image";
+}
+
+function validateFile(file: File, refs: Reference[]): string | null {
+  const type = detectType(file.name);
+  const limit = FILE_LIMITS[type];
+  if (file.size > limit.maxSize) {
+    return `${file.name} 超过 ${limit.label} 限制 (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+  }
+  const counts = { image: 0, video: 0, audio: 0 };
+  for (const r of refs) counts[r.type]++;
+  counts[type]++;
+  if (counts.image > MAX_IMAGE_COUNT) return `图片最多 ${MAX_IMAGE_COUNT} 张`;
+  if (counts.video > MAX_VIDEO_COUNT) return `视频最多 ${MAX_VIDEO_COUNT} 个`;
+  if (counts.audio > MAX_AUDIO_COUNT) return `音频最多 ${MAX_AUDIO_COUNT} 个`;
+  if (type === "audio") {
+    return `音频需控制在 2-15 秒内，请确认 ${file.name} 符合要求`;
+  }
+  return null;
+}
+
 export default function MainPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -69,6 +103,12 @@ export default function MainPage() {
   async function uploadFiles(files: FileList | File[]) {
     const arr = Array.from(files);
     for (const file of arr) {
+      // Validate
+      const error = validateFile(file, refs);
+      if (error) {
+        alert(error);
+        continue;
+      }
       try {
         const { upload_url, cos_url } = await getPresignedUpload(file.name);
         await fetch(upload_url, {
@@ -76,12 +116,7 @@ export default function MainPage() {
           body: file,
           headers: { "Content-Type": file.type || "application/octet-stream" },
         });
-        const ext = file.name.split(".").pop()?.toLowerCase() || "";
-        const type: Reference["type"] = ["mp4", "mov", "webm", "avi"].includes(ext)
-          ? "video"
-          : ["mp3", "wav", "aac", "m4a", "ogg"].includes(ext)
-          ? "audio"
-          : "image";
+        const type = detectType(file.name);
         setRefs(prev => [...prev, { type, cos_url, filename: file.name }]);
       } catch (err: any) {
         alert(`${file.name} 上传失败: ${err.message}`);
