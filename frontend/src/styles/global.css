@@ -271,16 +271,19 @@ body {
 .task-card--pending {
   cursor: grab;
   user-select: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 .task-card--pending:active {
   cursor: grabbing;
 }
 .task-card--dragging {
-  opacity: 0.4;
+  opacity: 0.35;
+  transform: scale(0.97);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 }
 .task-card--drag-over {
   border-color: var(--accent) !important;
-  border-style: dashed !important;
+  transform: translateY(4px);
 }
 .task-card__drag-hint {
   color: var(--text-secondary);

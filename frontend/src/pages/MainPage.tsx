@@ -96,6 +96,7 @@ export default function MainPage() {
   const [refs, setRefs] = useState<Reference[]>([]);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
 
   // Upload progress: filename -> {file, progress}
   const [uploading, setUploading] = useState<Map<string, UploadEntry>>(new Map());
@@ -262,14 +263,37 @@ export default function MainPage() {
   async function handleReorder(id: number, pos: number) { try { await reorderTask(id, pos); refresh(); } catch (e: any) { showToast(e.message); } }
   async function handlePauseResume() { try { queueStatus?.paused ? await resumeQueue() : await pauseQueue(); refresh(); } catch (e: any) { showToast(e.message); } }
 
-  function handleDragStart(e: React.DragEvent, taskId: number) { setDragId(taskId); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(taskId)); (e.currentTarget as HTMLElement).classList.add("task-card--dragging"); }
-  function handleDragEnd(e: React.DragEvent) { setDragId(null); (e.currentTarget as HTMLElement).classList.remove("task-card--dragging"); }
-  function handleDragOver(e: React.DragEvent, taskId: number) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragId !== null && dragId !== taskId) (e.currentTarget as HTMLElement).classList.add("task-card--drag-over"); }
-  function handleDragLeave(e: React.DragEvent) { (e.currentTarget as HTMLElement).classList.remove("task-card--drag-over"); }
-  function handleDrop(e: React.DragEvent, targetTask: Task) { e.preventDefault(); (e.currentTarget as HTMLElement).classList.remove("task-card--drag-over"); const dId = Number(e.dataTransfer.getData("text/plain")); if (dId && dId !== targetTask.id) handleReorder(dId, targetTask.position); setDragId(null); }
+  // Drag: reorder pending list locally then persist
+  function handleDragStart(e: React.DragEvent, taskId: number) { setDragId(taskId); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(taskId)); }
+  function handleDragEnd() { setDragId(null); setDragOverId(null); }
+  function handleDragOver(e: React.DragEvent, taskId: number) {
+    e.preventDefault(); e.dataTransfer.dropEffect = "move";
+    if (dragId && dragId !== taskId) setDragOverId(taskId);
+  }
+  function handleDragLeave(_e: React.DragEvent, taskId: number) {
+    if (dragOverId === taskId) setDragOverId(null);
+  }
+  function handleDrop(e: React.DragEvent, targetTask: Task) {
+    e.preventDefault(); setDragId(null); setDragOverId(null);
+    const dId = Number(e.dataTransfer.getData("text/plain"));
+    if (dId && dId !== targetTask.id) handleReorder(dId, targetTask.position);
+  }
+
+  // Build ordered pending list with drag-insertion for visual feedback
+  const orderedPending = useMemo(() => {
+    const base = tasks.filter(t => t.status === "pending").sort((a, b) => a.position - b.position);
+    if (!dragId || !dragOverId || dragId === dragOverId) return base;
+    const from = base.findIndex(t => t.id === dragId);
+    const to = base.findIndex(t => t.id === dragOverId);
+    if (from === -1 || to === -1) return base;
+    const reordered = [...base];
+    const [item] = reordered.splice(from, 1);
+    reordered.splice(to, 0, item);
+    return reordered;
+  }, [tasks, dragId, dragOverId]);
 
   const sortedDone = tasks.filter(t => t.status === "done" || t.status === "failed").sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  const pendingTasks = tasks.filter(t => t.status === "pending").sort((a, b) => a.position - b.position);
+  // orderedPending is defined above with drag-insertion logic
 
   function formatTime(ts: string) { const d = new Date(ts + "Z"); const diff = Date.now() - d.getTime(); const m = Math.floor(diff / 60000); if (m < 1) return "刚刚"; if (m < 60) return `${m} 分钟前`; const h = Math.floor(m / 60); if (h < 24) return `${h} 小时前`; return `${Math.floor(h / 24)} 天前`; }
   function refEmoji(type: string) { switch (type) { case "image": return "🖼"; case "video": return "🎬"; case "audio": return "🎵"; default: return "?"; } }
@@ -314,15 +338,16 @@ export default function MainPage() {
           {!queueStatus?.running && sortedDone.length === 0 && <div className="empty-state">暂无任务，在下方输入 prompt 开始</div>}
 
           <div className="section-header" style={{ marginTop: 8 }}>
-            排队中 ({pendingTasks.length})<span className="section-header__line"></span>
+            排队中 ({orderedPending.length})<span className="section-header__line"></span>
             <button className="topbar__btn" onClick={handlePauseResume} style={{ fontSize: 11, marginLeft: "auto" }}>{queueStatus?.paused ? "▶ 恢复队列" : "⏸ 暂停队列"}</button>
           </div>
-          {pendingTasks.map(t => (
-            <TaskCard key={t.id} task={t} isPending draggable formatTime={formatTime}
+          {orderedPending.map(t => (
+            <TaskCard key={t.id} task={t} isPending draggable isDragging={dragId === t.id} isDragOver={dragOverId === t.id}
+              formatTime={formatTime}
               onDelete={handleDelete} onDragStart={handleDragStart} onDragEnd={handleDragEnd}
               onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} />
           ))}
-          {pendingTasks.length === 0 && <div className="empty-state">队列为空，添加任务开始排队</div>}
+          {orderedPending.length === 0 && <div className="empty-state">队列为空，添加任务开始排队</div>}
           <div style={{ minHeight: 12 }}></div>
         </div>
       </div>
@@ -557,13 +582,15 @@ function FilePreview({ refData, onClose }: { refData: Reference; onClose: () => 
 // ===== Task Card =====
 function TaskCard({
   task, isActive = false, isPending = false, draggable = false,
+  isDragging = false, isDragOver = false,
   formatTime, onDelete, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: {
   task: Task; isActive?: boolean; isPending?: boolean; draggable?: boolean;
+  isDragging?: boolean; isDragOver?: boolean;
   formatTime: (ts: string) => string;
   onDelete?: (id: number) => void;
   onDragStart?: (e: React.DragEvent, taskId: number) => void; onDragEnd?: (e: React.DragEvent) => void;
-  onDragOver?: (e: React.DragEvent, taskId: number) => void; onDragLeave?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent, taskId: number) => void; onDragLeave?: (e: React.DragEvent, taskId: number) => void;
   onDrop?: (e: React.DragEvent, task: Task) => void;
 }) {
   const sc = task.status === "running" ? "status-badge--running" : task.status === "done" ? "status-badge--done" : task.status === "failed" ? "status-badge--failed" : "status-badge--pending";
@@ -571,12 +598,12 @@ function TaskCard({
   const tl = task.type === "text2video" ? "文生视频" : "全能参考";
 
   return (
-    <div className={`task-card ${isActive ? "task-card--active" : ""} ${isPending ? "task-card--pending" : ""}`}
+    <div className={`task-card ${isActive ? "task-card--active" : ""} ${isPending ? "task-card--pending" : ""} ${isDragging ? "task-card--dragging" : ""} ${isDragOver ? "task-card--drag-over" : ""}`}
       draggable={draggable}
       onDragStart={draggable ? (e) => onDragStart?.(e, task.id) : undefined}
       onDragEnd={draggable ? (e) => onDragEnd?.(e) : undefined}
       onDragOver={draggable ? (e) => onDragOver?.(e, task.id) : undefined}
-      onDragLeave={draggable ? (e) => onDragLeave?.(e) : undefined}
+      onDragLeave={draggable ? (e) => onDragLeave?.(e, task.id) : undefined}
       onDrop={draggable ? (e) => onDrop?.(e, task) : undefined}>
       <div className="task-card__header">
         <span className={`status-badge ${sc}`}><span className={`status-dot ${task.status === "running" ? "status-dot--running" : ""}`}></span>{sl}</span>
