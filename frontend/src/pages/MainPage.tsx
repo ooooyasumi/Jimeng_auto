@@ -101,9 +101,9 @@ export default function MainPage() {
   const [uploading, setUploading] = useState<Map<string, UploadEntry>>(new Map());
 
   const [prompt, setPrompt] = useState("");
-  const [duration, setDuration] = useState(5);
-  const [ratio, setRatio] = useState("16:9");
-  const [modelVersion, setModelVersion] = useState("seedance2.0fast");
+  const [duration, setDuration] = useState(() => Number(localStorage.getItem("jimeng_duration") || 5));
+  const [ratio, setRatio] = useState(() => localStorage.getItem("jimeng_ratio") || "16:9");
+  const [modelVersion, setModelVersion] = useState(() => localStorage.getItem("jimeng_model") || "seedance2.0fast");
   const [submitting, setSubmitting] = useState(false);
 
   const [showMention, setShowMention] = useState(false);
@@ -144,6 +144,9 @@ export default function MainPage() {
   }, []);
 
   useEffect(() => { refresh(); const t = setInterval(refresh, REFRESH_INTERVAL * 1000); return () => clearInterval(t); }, [refresh]);
+  useEffect(() => { localStorage.setItem("jimeng_model", modelVersion); }, [modelVersion]);
+  useEffect(() => { localStorage.setItem("jimeng_duration", String(duration)); }, [duration]);
+  useEffect(() => { localStorage.setItem("jimeng_ratio", ratio); }, [ratio]);
 
   // Full-page drag-and-drop
   useEffect(() => {
