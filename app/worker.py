@@ -10,6 +10,7 @@ from app.dreamina import (
     run_dreamina,
     parse_submit_output,
     build_submit_command,
+    list_all_tasks,
 )
 from app.cos import download_from_cos
 
@@ -29,9 +30,9 @@ def set_worker_paused(paused: bool):
 
 
 async def submit_task_to_dreamina(task) -> str | None:
-    """Submit a task to dreamina CLI. Returns submit_id or None."""
+    """Submit a task to dreamina CLI. Returns full submit_id or None."""
     params = json.loads(task["params"] or "{}")
-    refs = json.loads(task["refs"] or "[]")
+    refs = json.loads(task["references"] or "[]")
 
     tmp_dir = None
     ref_files = []
@@ -44,8 +45,9 @@ async def submit_task_to_dreamina(task) -> str | None:
                 ref_files.append(local_path)
 
         cmd = build_submit_command(task["type"], task["prompt"], params, ref_files)
-        output, stderr, rc = await run_dreamina(*cmd)
-        result = parse_submit_output(output + "\n" + stderr)
+        stdout, stderr, rc = await run_dreamina(*cmd)
+        combined = stdout + "\n" + stderr
+        result = parse_submit_output(combined)
         return result.get("submit_id")
     except Exception as e:
         logger.error(f"Submit failed for task {task['id']}: {e}")
@@ -55,19 +57,49 @@ async def submit_task_to_dreamina(task) -> str | None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-async def check_task_result(submit_id: str) -> dict:
-    """Check the result of a submitted task."""
-    output, stderr, rc = await run_dreamina("query_result", "--submit_id", submit_id)
-    combined = output + "\n" + stderr
-    result = parse_submit_output(combined)
+def sync_tasks_from_dreamina(dreamina_tasks: list[dict]):
+    """Sync our DB running/pending tasks with dreamina's real status."""
+    db = get_db()
+    try:
+        for dt in dreamina_tasks:
+            sid = dt.get("submit_id", "")
+            if not sid:
+                continue
+            gs = dt.get("gen_status", "")
+            fr = dt.get("fail_reason", "")
 
-    # If CLI returned an error about missing record, treat as failed
-    if rc != 0 or "record not found" in combined.lower():
-        if result["gen_status"] != "success":
-            result["gen_status"] = "fail"
-            if not result.get("fail_reason"):
-                result["fail_reason"] = stderr.strip() or "query failed"
-    return result
+            # Find our task by submit_id (full or partial match)
+            row = db.execute(
+                "SELECT id, status FROM tasks WHERE submit_id = ?",
+                (sid,)
+            ).fetchone()
+            if not row:
+                # Try partial match
+                row = db.execute(
+                    "SELECT id, status FROM tasks WHERE ? LIKE submit_id || '%'",
+                    (sid,)
+                ).fetchone()
+
+            if not row:
+                continue
+
+            task_id = row["id"]
+
+            if gs == "success":
+                db.execute(
+                    "UPDATE tasks SET status='done', gen_status='success', updated_at=datetime('now') WHERE id=? AND status='running'",
+                    (task_id,)
+                )
+                logger.info(f"Task {task_id} completed (synced from list_task)")
+            elif gs == "fail":
+                db.execute(
+                    "UPDATE tasks SET status='failed', gen_status='fail', error_message=?, updated_at=datetime('now') WHERE id=? AND status='running'",
+                    (fr, task_id)
+                )
+                logger.info(f"Task {task_id} failed: {fr}")
+        db.commit()
+    finally:
+        db.close()
 
 
 async def queue_worker():
@@ -82,48 +114,30 @@ async def queue_worker():
 
             db = get_db()
 
-            running = db.execute(
-                "SELECT * FROM tasks WHERE status = 'running' ORDER BY updated_at DESC LIMIT 1"
-            ).fetchone()
+            # Step 1: Sync running tasks with dreamina's real status via list_task
+            running_tasks = db.execute(
+                "SELECT * FROM tasks WHERE status = 'running'"
+            ).fetchall()
 
-            if running:
+            if running_tasks:
+                dm_tasks = await list_all_tasks()
+                if dm_tasks:
+                    sync_tasks_from_dreamina(dm_tasks)
                 db.close()
-                result = await check_task_result(running["submit_id"])
 
+                # Re-check if any running task is now done/failed
                 db = get_db()
-                if result.get("gen_status") == "success":
-                    db.execute(
-                        """UPDATE tasks SET status='done', gen_status='success',
-                           result_url=?, updated_at=datetime('now')
-                           WHERE id=?""",
-                        (result.get("result_url"), running["id"])
-                    )
-                    db.commit()
-                    logger.info(f"Task {running['id']} completed successfully")
-                elif result.get("gen_status") == "fail":
-                    db.execute(
-                        """UPDATE tasks SET status='failed', gen_status='fail',
-                           error_message=?, updated_at=datetime('now')
-                           WHERE id=?""",
-                        (result.get("fail_reason", "Unknown error"), running["id"])
-                    )
-                    db.commit()
-                    logger.info(f"Task {running['id']} failed: {result.get('fail_reason')}")
-                else:
-                    db.execute(
-                        "UPDATE tasks SET gen_status='querying', updated_at=datetime('now') WHERE id=?",
-                        (running["id"],)
-                    )
-                    db.commit()
+                still_running = db.execute(
+                    "SELECT COUNT(*) FROM tasks WHERE status = 'running'"
+                ).fetchone()[0]
                 db.close()
 
-                if result.get("gen_status") in ("success", "fail"):
-                    continue  # Task done, immediately try to submit next
-                else:
-                    await asyncio.sleep(POLL_INTERVAL)  # Still running, wait
+                if still_running > 0:
+                    await asyncio.sleep(POLL_INTERVAL)
                     continue
 
-            # No running task, pick next pending
+            # Step 2: No running tasks, submit next pending
+            db = get_db()
             next_task = db.execute(
                 "SELECT * FROM tasks WHERE status = 'pending' ORDER BY position ASC LIMIT 1"
             ).fetchone()
@@ -148,12 +162,9 @@ async def queue_worker():
                         (next_task["id"],)
                     )
                     db.commit()
-                    logger.error(f"Task {next_task['id']} submit failed")
-                db.close()
-                await asyncio.sleep(POLL_INTERVAL)
-            else:
-                db.close()
-                await asyncio.sleep(POLL_INTERVAL)
+                    logger.error(f"Task {next_task['id']} submit returned no submit_id")
+            db.close()
+            await asyncio.sleep(POLL_INTERVAL)
 
         except Exception as e:
             logger.exception(f"Worker error: {e}")

@@ -34,11 +34,28 @@ def parse_submit_output(output: str) -> dict:
         "fail_reason": None,
         "result_url": None,
     }
+    # Try JSON first (list_task format)
+    try:
+        data = json.loads(output)
+        if isinstance(data, list) and len(data) > 0:
+            data = data[0]
+        if isinstance(data, dict):
+            result["submit_id"] = data.get("submit_id")
+            result["gen_status"] = data.get("gen_status")
+            result["fail_reason"] = data.get("fail_reason")
+            # result_url may be nested
+            if data.get("result_url"):
+                result["result_url"] = data["result_url"]
+            return result
+    except (json.JSONDecodeError, KeyError):
+        pass
+
+    # Fallback: parse plain text
     lines = output.strip().split("\n")
     for line in lines:
         line = line.strip()
         if "submit_id" in line.lower():
-            m = re.search(r"[0-9a-fA-F]{8,64}", line)
+            m = re.search(r"[0-9a-fA-F-]{8,64}", line)
             if m:
                 result["submit_id"] = m.group(0)
         if "gen_status" in line.lower():
@@ -49,12 +66,21 @@ def parse_submit_output(output: str) -> dict:
             elif "fail" in line.lower():
                 result["gen_status"] = "fail"
         if "fail_reason" in line.lower():
-            result["fail_reason"] = line.split("fail_reason", 1)[-1].strip(": =")
+            result["fail_reason"] = line.split("fail_reason", 1)[-1].strip(": =\"")
         if "result_url" in line.lower() or "video_url" in line.lower():
             m = re.search(r"(https?://\S+)", line)
             if m:
                 result["result_url"] = m.group(1)
     return result
+
+
+async def list_all_tasks() -> list[dict]:
+    """Fetch all recent tasks from dreamina via list_task."""
+    stdout, _, _ = await run_dreamina("list_task", "--limit", "50")
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        return []
 
 
 def determine_task_type(references: list) -> str:
