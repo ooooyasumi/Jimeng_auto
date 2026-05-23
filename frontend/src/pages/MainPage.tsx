@@ -21,6 +21,8 @@ export default function MainPage() {
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [credit, setCredit] = useState<number | null>(null);
   const [refs, setRefs] = useState<Reference[]>([]);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [dragId, setDragId] = useState<number | null>(null);
 
   // Form state
   const [prompt, setPrompt] = useState("");
@@ -44,6 +46,7 @@ export default function MainPage() {
       setTasks(taskData);
       setQueueStatus(qs);
       if (creditData?.total_credit) setCredit(creditData.total_credit);
+      setLastRefresh(new Date());
     } catch (err) {
       console.error("Refresh failed", err);
     }
@@ -114,14 +117,9 @@ export default function MainPage() {
     }
   }
 
-  async function handleMove(taskId: number, direction: 1 | -1) {
-    const pendingTasks = tasks.filter(t => t.status === "pending").sort((a, b) => a.position - b.position);
-    const idx = pendingTasks.findIndex(t => t.id === taskId);
-    if (idx === -1) return;
-    const targetIdx = idx + direction;
-    if (targetIdx < 0 || targetIdx >= pendingTasks.length) return;
+  async function handleReorder(taskId: number, targetPosition: number) {
     try {
-      await reorderTask(taskId, pendingTasks[targetIdx].position);
+      await reorderTask(taskId, targetPosition);
       refresh();
     } catch (err: any) {
       alert(err.message);
@@ -141,7 +139,42 @@ export default function MainPage() {
     }
   }
 
-  // Sort tasks: running first, then pending by position, then done/failed by updated_at desc
+  // Drag handlers
+  function handleDragStart(e: React.DragEvent, taskId: number) {
+    setDragId(taskId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(taskId));
+    (e.currentTarget as HTMLElement).classList.add("task-card--dragging");
+  }
+
+  function handleDragEnd(e: React.DragEvent) {
+    setDragId(null);
+    (e.currentTarget as HTMLElement).classList.remove("task-card--dragging");
+  }
+
+  function handleDragOver(e: React.DragEvent, taskId: number) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragId !== null && dragId !== taskId) {
+      const target = e.currentTarget as HTMLElement;
+      target.classList.add("task-card--drag-over");
+    }
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    (e.currentTarget as HTMLElement).classList.remove("task-card--drag-over");
+  }
+
+  function handleDrop(e: React.DragEvent, targetTask: Task) {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).classList.remove("task-card--drag-over");
+    const draggedId = Number(e.dataTransfer.getData("text/plain"));
+    if (draggedId && draggedId !== targetTask.id) {
+      handleReorder(draggedId, targetTask.position);
+    }
+    setDragId(null);
+  }
+
   const sortedDone = tasks
     .filter(t => t.status === "done" || t.status === "failed")
     .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
@@ -182,6 +215,11 @@ export default function MainPage() {
             <div className="topbar__stat">已完成<span className="topbar__stat-num">{queueStatus?.done_count || 0}</span></div>
           </div>
           <div className="topbar__right">
+            {lastRefresh && (
+              <span className="topbar__refresh" title="每 15 秒自动刷新">
+                {lastRefresh.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </span>
+            )}
             {credit !== null && <span className="topbar__credit">✦ {credit.toLocaleString()} 积分</span>}
             <button className="topbar__btn" onClick={() => { localStorage.removeItem("token"); window.location.reload(); }}>退出</button>
           </div>
@@ -233,18 +271,20 @@ export default function MainPage() {
             </button>
           </div>
 
-          {pendingTasks.map((task, idx) => (
+          {pendingTasks.map((task) => (
             <TaskCard
               key={task.id}
               task={task}
               isPending
-              isFirst={idx === 0}
-              isLast={idx === pendingTasks.length - 1}
+              draggable
               formatTime={formatTime}
               refIcon={refIcon}
               onDelete={handleDelete}
-              onMoveUp={() => handleMove(task.id, -1)}
-              onMoveDown={() => handleMove(task.id, 1)}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
             />
           ))}
 
@@ -259,7 +299,6 @@ export default function MainPage() {
       {/* Bottom Input Area */}
       <div className="bottom-bar">
         <div className="bottom-bar__inner container">
-          {/* Uploaded files preview */}
           {refs.length > 0 && (
             <div className="uploaded-files">
               {refs.map((ref, i) => (
@@ -271,7 +310,6 @@ export default function MainPage() {
             </div>
           )}
 
-          {/* Prompt input row */}
           <div className="bottom-bar__input-row">
             <textarea
               className="bottom-bar__prompt"
@@ -300,7 +338,6 @@ export default function MainPage() {
             </button>
           </div>
 
-          {/* Controls row */}
           <div className="bottom-bar__controls">
             <div className="control-group">
               <span className="control-label">模型</span>
@@ -345,24 +382,28 @@ function TaskCard({
   task,
   isActive = false,
   isPending = false,
-  isFirst = false,
-  isLast = false,
+  draggable = false,
   formatTime,
   refIcon,
   onDelete,
-  onMoveUp,
-  onMoveDown,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   task: Task;
   isActive?: boolean;
   isPending?: boolean;
-  isFirst?: boolean;
-  isLast?: boolean;
+  draggable?: boolean;
   formatTime: (ts: string) => string;
   refIcon: (type: string) => string;
   onDelete?: (id: number) => void;
-  onMoveUp?: () => void;
-  onMoveDown?: () => void;
+  onDragStart?: (e: React.DragEvent, taskId: number) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent, taskId: number) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent, task: Task) => void;
 }) {
   const statusClass = task.status === "running"
     ? "status-badge--running"
@@ -383,12 +424,21 @@ function TaskCard({
   const typeLabel = task.type === "text2video" ? "文生视频" : "全能参考";
 
   return (
-    <div className={`task-card ${isActive ? "task-card--active" : ""}`}>
+    <div
+      className={`task-card ${isActive ? "task-card--active" : ""} ${isPending ? "task-card--pending" : ""}`}
+      draggable={draggable}
+      onDragStart={draggable ? (e) => onDragStart?.(e, task.id) : undefined}
+      onDragEnd={draggable ? (e) => onDragEnd?.(e) : undefined}
+      onDragOver={draggable ? (e) => onDragOver?.(e, task.id) : undefined}
+      onDragLeave={draggable ? (e) => onDragLeave?.(e) : undefined}
+      onDrop={draggable ? (e) => onDrop?.(e, task) : undefined}
+    >
       <div className="task-card__header">
         <span className={`status-badge ${statusClass}`}>
           <span className={`status-dot ${task.status === "running" ? "status-dot--running" : ""}`}></span>
           {statusLabel}
         </span>
+        {isPending && <span className="task-card__drag-hint" title="长按拖拽排序">⠿</span>}
         <span className="task-card__time">{formatTime(task.created_at)}</span>
         <span className="task-card__cost">{isPending ? "预计 " : ""}-15 积分</span>
 
@@ -400,8 +450,6 @@ function TaskCard({
 
         {isPending && (
           <div className="task-card__actions">
-            {!isFirst && <button className="task-card__action-btn" onClick={onMoveUp}>↑</button>}
-            {!isLast && <button className="task-card__action-btn" onClick={onMoveDown}>↓</button>}
             <button className="task-card__action-btn task-card__action-btn--danger" onClick={() => onDelete?.(task.id)}>删除</button>
           </div>
         )}

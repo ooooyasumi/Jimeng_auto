@@ -102,6 +102,11 @@ body {
   color: var(--text-primary);
   border-color: var(--text-secondary);
 }
+.topbar__refresh {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Main scrollable area */
 .main {
@@ -230,6 +235,30 @@ body {
   gap: 3px;
 }
 .task-card__link:hover { text-decoration: underline; }
+
+/* Drag and drop */
+.task-card--pending {
+  cursor: grab;
+  user-select: none;
+}
+.task-card--pending:active {
+  cursor: grabbing;
+}
+.task-card--dragging {
+  opacity: 0.4;
+}
+.task-card--drag-over {
+  border-color: var(--accent) !important;
+  border-style: dashed !important;
+}
+.task-card__drag-hint {
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: grab;
+  user-select: none;
+  margin-right: 4px;
+}
+
 .task-card__right-col {
   display: flex;
   align-items: center;
