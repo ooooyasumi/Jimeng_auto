@@ -44,8 +44,8 @@ async def submit_task_to_dreamina(task) -> str | None:
                 ref_files.append(local_path)
 
         cmd = build_submit_command(task["type"], task["prompt"], params, ref_files)
-        output = await run_dreamina(*cmd)
-        result = parse_submit_output(output)
+        output, stderr, rc = await run_dreamina(*cmd)
+        result = parse_submit_output(output + "\n" + stderr)
         return result.get("submit_id")
     except Exception as e:
         logger.error(f"Submit failed for task {task['id']}: {e}")
@@ -57,12 +57,17 @@ async def submit_task_to_dreamina(task) -> str | None:
 
 async def check_task_result(submit_id: str) -> dict:
     """Check the result of a submitted task."""
-    try:
-        output = await run_dreamina("query_result", "--submit_id", submit_id)
-        return parse_submit_output(output)
-    except Exception as e:
-        logger.error(f"Query failed for {submit_id}: {e}")
-        return {"gen_status": "querying"}
+    output, stderr, rc = await run_dreamina("query_result", "--submit_id", submit_id)
+    combined = output + "\n" + stderr
+    result = parse_submit_output(combined)
+
+    # If CLI returned an error about missing record, treat as failed
+    if rc != 0 or "record not found" in combined.lower():
+        if result["gen_status"] != "success":
+            result["gen_status"] = "fail"
+            if not result.get("fail_reason"):
+                result["fail_reason"] = stderr.strip() or "query failed"
+    return result
 
 
 async def queue_worker():

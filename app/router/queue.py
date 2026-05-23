@@ -53,9 +53,8 @@ def resume_queue():
 
 @router.get("/credit", response_model=CreditResponse)
 async def get_credit():
-    try:
-        out = await run_dreamina("user_credit")
-    except RuntimeError:
+    out, stderr, rc = await run_dreamina("user_credit")
+    if rc != 0:
         return CreditResponse(total_credit=0)
     import re
     m = re.search(r"total_credit\s*[:=]?\s*(\d+)", out)

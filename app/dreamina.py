@@ -10,8 +10,8 @@ from typing import Optional
 DREAMINA_BIN = shutil.which("dreamina") or "dreamina"
 
 
-async def run_dreamina(*args) -> str:
-    """Run a dreamina CLI command and return stdout."""
+async def run_dreamina(*args) -> tuple[str, str, int]:
+    """Run a dreamina CLI command. Returns (stdout, stderr, returncode)."""
     cmd = [DREAMINA_BIN, *args]
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -19,10 +19,11 @@ async def run_dreamina(*args) -> str:
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        err = stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(f"dreamina exited with {proc.returncode}: {err}")
-    return stdout.decode("utf-8", errors="replace")
+    return (
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+        proc.returncode or 0,
+    )
 
 
 def parse_submit_output(output: str) -> dict:
