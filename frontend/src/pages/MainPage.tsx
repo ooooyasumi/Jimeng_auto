@@ -398,10 +398,12 @@ export default function MainPage() {
                 {prompt.length}/{MAX_PROMPT_LENGTH}
               </span>
             )}
-            <span className="cost-badge">✦ {estimatedCost}</span>
-            <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading || prompt.length > MAX_PROMPT_LENGTH}>
-              {isUploading ? `上传中 ${overallProgress}%` : submitting ? "提交中..." : "加入队列"}
-            </button>
+            <div className="bottom-bar__right">
+              <span className="cost-badge">✦ {estimatedCost}</span>
+              <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading || prompt.length > MAX_PROMPT_LENGTH}>
+                {isUploading ? `上传中 ${overallProgress}%` : submitting ? "提交中..." : "加入队列"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

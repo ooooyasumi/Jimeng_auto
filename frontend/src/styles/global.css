@@ -387,6 +387,12 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
+.bottom-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
 .control-group {
   display: flex;
   align-items: center;
