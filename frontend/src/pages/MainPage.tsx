@@ -338,8 +338,7 @@ export default function MainPage() {
           <div className="bottom-bar__controls">
             <Dropdown label="模型" value={modelVersion} onChange={setModelVersion}
               options={[{ value: "seedance2.0fast", label: "seedance2.0fast" }, { value: "seedance2.0", label: "seedance2.0" }]} />
-            <Dropdown label="时长" value={String(duration)} onChange={v => setDuration(Number(v))}
-              options={[{ value: "4", label: "4s" }, { value: "5", label: "5s" }, { value: "8", label: "8s" }, { value: "10", label: "10s" }, { value: "15", label: "15s" }]} />
+            <Stepper label="时长" value={duration} min={4} max={15} onChange={setDuration} suffix="s" />
             <Dropdown label="比例" value={ratio} onChange={setRatio}
               options={[
                 { value: "1:1", label: "1:1", ratioW: 1, ratioH: 1 },
@@ -368,6 +367,22 @@ function RatioPreview({ w, h }: { w: number; h: number }) {
     <span className="ratio-preview">
       <span className="ratio-preview__inner" style={{ width: iw, height: ih }} />
     </span>
+  );
+}
+
+// ===== Stepper (duration picker) =====
+function Stepper({ label, value, min, max, onChange, suffix }: {
+  label: string; value: number; min: number; max: number; onChange: (v: number) => void; suffix: string;
+}) {
+  return (
+    <div className="control-group">
+      <span className="control-label">{label}</span>
+      <div className="stepper">
+        <button className="stepper__btn" onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min}>−</button>
+        <span className="stepper__val">{value}{suffix}</span>
+        <button className="stepper__btn" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max}>+</button>
+      </div>
+    </div>
   );
 }
 
