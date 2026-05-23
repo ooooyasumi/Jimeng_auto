@@ -76,6 +76,7 @@ export default function MainPage() {
   const [mentionFilter, setMentionFilter] = useState("");
   const [previewRef, setPreviewRef] = useState<Reference | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done">("idle");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -88,12 +89,15 @@ export default function MainPage() {
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
   const refresh = useCallback(async () => {
+    setRefreshState("loading");
     try {
       const [td, qs, cd] = await Promise.all([fetchTasks(), fetchQueueStatus(), fetchCredit()]);
       setTasks(td); setQueueStatus(qs);
       if (cd?.total_credit) setCredit(cd.total_credit);
       setLastRefresh(new Date());
-    } catch (err) { console.error("Refresh failed", err); }
+      setRefreshState("done");
+      setTimeout(() => setRefreshState("idle"), 1000);
+    } catch (err) { setRefreshState("idle"); console.error("Refresh failed", err); }
   }, []);
 
   useEffect(() => { refresh(); const t = setInterval(refresh, REFRESH_INTERVAL * 1000); return () => clearInterval(t); }, [refresh]);
@@ -247,7 +251,9 @@ export default function MainPage() {
                 <span className="topbar__refresh-tooltip">数据每 {REFRESH_INTERVAL} 秒自动刷新</span>
               </span>
             )}
-            <button className="topbar__btn" onClick={() => refresh()} title="立即刷新">↻ 刷新</button>
+            <button className={`topbar__btn ${refreshState === "loading" ? "topbar__btn--pressed" : ""} ${refreshState === "done" ? "topbar__btn--done" : ""}`} onClick={() => refresh()} disabled={refreshState === "loading"} title="立即刷新">
+              {refreshState === "loading" ? "⟳ 刷新中" : refreshState === "done" ? "✓ 已刷新" : "↻ 刷新"}
+            </button>
             {credit !== null && <span className="topbar__credit">✦ {credit.toLocaleString()} 积分</span>}
             <button className="topbar__btn" onClick={() => { localStorage.removeItem("token"); window.location.reload(); }}>退出</button>
           </div>

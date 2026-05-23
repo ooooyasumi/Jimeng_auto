@@ -102,6 +102,14 @@ body {
   color: var(--text-primary);
   border-color: var(--text-secondary);
 }
+.topbar__btn--pressed {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.topbar__btn--done {
+  color: var(--success) !important;
+  border-color: var(--success) !important;
+}
 .topbar__refresh {
   font-size: 11px;
   color: var(--text-secondary);
