@@ -19,6 +19,7 @@ const FILE_LIMITS: Record<string, { maxSize: number; label: string }> = {
 const MAX_IMAGE_COUNT = 9;
 const MAX_VIDEO_COUNT = 3;
 const MAX_AUDIO_COUNT = 3;
+const MAX_PROMPT_LENGTH = 5000;
 
 function detectType(filename: string): Reference["type"] {
   const ext = filename.split(".").pop()?.toLowerCase() || "";
@@ -122,9 +123,8 @@ export default function MainPage() {
       setTasks(td); setQueueStatus(qs);
       if (cd?.total_credit) setCredit(cd.total_credit);
       setLastRefresh(new Date());
-      setRefreshState("done");
-      setTimeout(() => setRefreshState("idle"), 1000);
-    } catch (err) { setRefreshState("idle"); console.error("Refresh failed", err); }
+    } catch (err) { console.error("Refresh failed", err); }
+    setTimeout(() => setRefreshState("idle"), 400);
   }, []);
 
   useEffect(() => { refresh(); const t = setInterval(refresh, REFRESH_INTERVAL * 1000); return () => clearInterval(t); }, [refresh]);
@@ -203,6 +203,7 @@ export default function MainPage() {
   // ===== @ mention =====
   function handlePromptChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const value = e.target.value; setPrompt(value);
+    const ta = e.target; ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
     const cursorPos = e.target.selectionStart || 0;
     const textBefore = value.slice(0, cursorPos);
     const atMatch = textBefore.match(/@([^\s@]*)$/);
@@ -229,6 +230,7 @@ export default function MainPage() {
   // ===== Submit =====
   async function handleSubmit() {
     if (!prompt.trim() || isUploading) return;
+    if (prompt.length > MAX_PROMPT_LENGTH) { showToast(`提示词最多 ${MAX_PROMPT_LENGTH} 字`); return; }
     setSubmitting(true);
     try {
       await createTask({ prompt: prompt.trim(), duration, ratio, model_version: modelVersion, references: refs });
@@ -278,9 +280,7 @@ export default function MainPage() {
                 <span className="topbar__refresh-tooltip">数据每 {REFRESH_INTERVAL} 秒自动刷新</span>
               </span>
             )}
-            <button className={`topbar__btn ${refreshState === "loading" ? "topbar__btn--pressed" : ""} ${refreshState === "done" ? "topbar__btn--done" : ""}`} onClick={() => refresh()} disabled={refreshState === "loading"} title="立即刷新">
-              {refreshState === "loading" ? "⟳ 刷新中" : refreshState === "done" ? "✓ 已刷新" : "↻ 刷新"}
-            </button>
+            <button className={`topbar__btn ${refreshState === "loading" ? "topbar__btn--pressed" : ""}`} onClick={() => refresh()} disabled={refreshState === "loading"} title="立即刷新">↻ 刷新</button>
             {credit !== null && <span className="topbar__credit">✦ {credit.toLocaleString()} 积分</span>}
             <button className="topbar__btn" onClick={() => { localStorage.removeItem("token"); window.location.reload(); }}>退出</button>
           </div>
@@ -357,7 +357,12 @@ export default function MainPage() {
             </div>
             <input ref={fileInputRef} type="file" style={{ display: "none" }} multiple accept="image/*,video/*,audio/*" onChange={handleFileInput} />
             <div className="bottom-bar__upload" onClick={() => fileInputRef.current?.click()} title="上传参考文件（也支持拖拽/粘贴）">+</div>
-            <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading}>
+            {prompt.length > MAX_PROMPT_LENGTH * 0.8 && (
+              <span className={`prompt-counter ${prompt.length > MAX_PROMPT_LENGTH ? "prompt-counter--over" : ""}`}>
+                {prompt.length}/{MAX_PROMPT_LENGTH}
+              </span>
+            )}
+            <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading || prompt.length > MAX_PROMPT_LENGTH}>
               {isUploading ? `上传中 ${overallProgress}%` : submitting ? "提交中..." : "加入队列"}
             </button>
           </div>

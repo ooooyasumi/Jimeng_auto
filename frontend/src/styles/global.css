@@ -360,8 +360,9 @@ body {
   resize: none;
   outline: none;
   min-height: 40px;
-  max-height: 80px;
+  max-height: 200px;
   line-height: 1.5;
+  overflow-y: auto;
 }
 .bottom-bar__prompt:focus { border-color: var(--accent); }
 .bottom-bar__prompt::placeholder { color: var(--text-secondary); }
@@ -588,6 +589,13 @@ body {
 }
 .submit-btn:hover { opacity: 0.85; }
 .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.prompt-counter {
+  font-size: 10px;
+  color: var(--text-secondary);
+  align-self: center;
+  white-space: nowrap;
+}
+.prompt-counter--over { color: var(--danger); }
 .mode-hint {
   font-size: 11px;
   color: var(--text-secondary);
