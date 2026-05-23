@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from qcloud_cos import CosConfig, CosS3Client
 
-REGION = os.environ.get("COS_REGION", "ap-guangzhou")
+REGION = os.environ.get("COS_REGION", "ap-chongqing")
 BUCKET = "jimengauto-1372876299"
 CUSTOM_DOMAIN = os.environ.get("COS_CUSTOM_DOMAIN", "jimengauto.cos.ooooyasumi.com")
 SECRET_ID = os.environ.get("COS_SECRET_ID", "")
@@ -56,6 +56,22 @@ def generate_presigned_upload(filename: str) -> dict:
     )
     cos_url = f"https://{CUSTOM_DOMAIN}/{key}"
     return {"upload_url": url, "cos_url": cos_url, "key": key}
+
+
+async def upload_to_cos(file) -> dict:
+    """Upload a file through backend to COS (fallback for CORS issues)."""
+    client = _client()
+    if not client:
+        raise RuntimeError("COS not configured: missing SECRET_ID/SECRET_KEY")
+
+    filename = file.filename or "untitled"
+    file_type = _detect_type(filename)
+    key = _make_key(file_type, filename)
+
+    data = await file.read()
+    client.put_object(Bucket=BUCKET, Key=key, Body=data)
+    cos_url = f"https://{CUSTOM_DOMAIN}/{key}"
+    return {"cos_url": cos_url, "key": key}
 
 
 def download_from_cos(cos_url: str, local_path: str):

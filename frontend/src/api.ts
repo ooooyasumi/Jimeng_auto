@@ -147,3 +147,16 @@ export async function getPresignedUpload(filename: string): Promise<{
     body: JSON.stringify({ filename }),
   });
 }
+
+export async function proxyUpload(file: File): Promise<{ cos_url: string; key: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const headers: Record<string, string> = {};
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  const res = await fetch(`${BASE}/upload/proxy`, { method: "POST", body: formData, headers });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}

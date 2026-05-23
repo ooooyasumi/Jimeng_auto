@@ -9,6 +9,7 @@ import {
   resumeQueue,
   createTask,
   getPresignedUpload,
+  proxyUpload,
 } from "../api";
 import type { Task, QueueStatus, Reference } from "../api";
 
@@ -98,24 +99,71 @@ export default function MainPage() {
     return () => clearInterval(timer);
   }, [refresh]);
 
+  // Full-page drag-and-drop file upload
+  useEffect(() => {
+    let dragCounter = 0;
+    function onDragEnter(e: DragEvent) {
+      e.preventDefault();
+      dragCounter++;
+      if (e.dataTransfer?.types.includes("Files")) {
+        document.body.classList.add("body--drag-over");
+      }
+    }
+    function onDragLeave(_e: DragEvent) {
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        document.body.classList.remove("body--drag-over");
+      }
+    }
+    function onDragOver(e: DragEvent) {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    }
+    function onDrop(e: DragEvent) {
+      e.preventDefault();
+      dragCounter = 0;
+      document.body.classList.remove("body--drag-over");
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        uploadFiles(e.dataTransfer.files);
+      }
+    }
+    document.addEventListener("dragenter", onDragEnter);
+    document.addEventListener("dragleave", onDragLeave);
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragenter", onDragEnter);
+      document.removeEventListener("dragleave", onDragLeave);
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [refs]);
+
   // ===== Upload helpers =====
 
   async function uploadFiles(files: FileList | File[]) {
     const arr = Array.from(files);
     for (const file of arr) {
-      // Validate
       const error = validateFile(file, refs);
-      if (error) {
-        alert(error);
-        continue;
-      }
+      if (error) { alert(error); continue; }
       try {
-        const { upload_url, cos_url } = await getPresignedUpload(file.name);
-        await fetch(upload_url, {
-          method: "PUT",
-          body: file,
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-        });
+        let cos_url: string;
+        // Try direct presigned upload first
+        try {
+          const { upload_url, cos_url: presignedCosUrl } = await getPresignedUpload(file.name);
+          const res = await fetch(upload_url, {
+            method: "PUT",
+            body: file,
+            headers: { "Content-Type": file.type || "application/octet-stream" },
+          });
+          if (!res.ok) throw new Error(`COS returned ${res.status}`);
+          cos_url = presignedCosUrl;
+        } catch {
+          // Fallback to backend proxy upload
+          const result = await proxyUpload(file);
+          cos_url = result.cos_url;
+        }
         const type = detectType(file.name);
         setRefs(prev => [...prev, { type, cos_url, filename: file.name }]);
       } catch (err: any) {

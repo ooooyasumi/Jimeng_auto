@@ -652,6 +652,22 @@ body {
   min-width: 300px;
 }
 
+/* ===== Full-page drop zone ===== */
+.body--drag-over::after {
+  content: "释放文件以上传";
+  position: fixed;
+  inset: 0;
+  background: rgba(0,202,224,0.08);
+  border: 2px dashed var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--accent);
+  z-index: 999;
+  pointer-events: none;
+}
+
 /* ===== Drop zone highlight ===== */
 .bottom-bar--drag-over {
   background: rgba(0,202,224,0.04);
