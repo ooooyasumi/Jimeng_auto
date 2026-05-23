@@ -153,7 +153,7 @@ export default function MainPage() {
   }
 
   function handleFileDragOver(e: React.DragEvent) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; }
-  function handleFileDrop(e: React.DragEvent) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files?.length) startUploads(e.dataTransfer.files); }
+  function handleFileDrop(e: React.DragEvent) { e.preventDefault(); e.stopPropagation(); document.body.classList.remove("body--drag-over"); if (e.dataTransfer.files?.length) startUploads(e.dataTransfer.files); }
 
   function handlePaste(e: React.ClipboardEvent) {
     const items = e.clipboardData?.items; if (!items) return;
@@ -325,14 +325,67 @@ export default function MainPage() {
           </div>
 
           <div className="bottom-bar__controls">
-            <div className="control-group"><span className="control-label">模型</span><select className="control-select" value={modelVersion} onChange={e => setModelVersion(e.target.value)}><option value="seedance2.0fast">seedance2.0fast</option><option value="seedance2.0">seedance2.0</option></select></div>
-            <div className="control-group"><span className="control-label">时长</span><select className="control-select" value={duration} onChange={e => setDuration(Number(e.target.value))}><option value={4}>4s</option><option value={5}>5s</option><option value={8}>8s</option><option value={10}>10s</option><option value={15}>15s</option></select></div>
-            <div className="control-group"><span className="control-label">比例</span><select className="control-select" value={ratio} onChange={e => setRatio(e.target.value)}><option value="1:1">1:1</option><option value="3:4">3:4</option><option value="4:3">4:3</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="21:9">21:9</option></select></div>
+            <Dropdown label="模型" value={modelVersion} onChange={setModelVersion}
+              options={[{ value: "seedance2.0fast", label: "seedance2.0fast" }, { value: "seedance2.0", label: "seedance2.0" }]} />
+            <Dropdown label="时长" value={String(duration)} onChange={v => setDuration(Number(v))}
+              options={[{ value: "4", label: "4s" }, { value: "5", label: "5s" }, { value: "8", label: "8s" }, { value: "10", label: "10s" }, { value: "15", label: "15s" }]} />
+            <Dropdown label="比例" value={ratio} onChange={setRatio}
+              options={[
+                { value: "1:1", label: "1:1", ratioW: 1, ratioH: 1 },
+                { value: "3:4", label: "3:4", ratioW: 3, ratioH: 4 },
+                { value: "4:3", label: "4:3", ratioW: 4, ratioH: 3 },
+                { value: "16:9", label: "16:9", ratioW: 16, ratioH: 9 },
+                { value: "9:16", label: "9:16", ratioW: 9, ratioH: 16 },
+                { value: "21:9", label: "21:9", ratioW: 21, ratioH: 9 },
+              ]} />
             <div className={`mode-hint ${(hasRefs || isUploading) ? "mode-hint--multimodal" : "mode-hint--text2video"}`}>模式: <span>{modeLabel}</span></div>
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+// ===== Custom Dropdown =====
+function Dropdown({ label, value, onChange, options }: {
+  label: string; value: string; onChange: (v: string) => void;
+  options: { value: string; label: string; ratioW?: number; ratioH?: number }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = options.find(o => o.value === value) || options[0];
+
+  useEffect(() => {
+    function clickOut(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", clickOut);
+    return () => document.removeEventListener("mousedown", clickOut);
+  }, []);
+
+  return (
+    <div className="control-group dropdown-wrap" ref={ref}>
+      <span className="control-label">{label}</span>
+      <div className={`dropdown-trigger ${open ? "dropdown-trigger--open" : ""}`} onClick={() => setOpen(!open)}>
+        {selected.ratioW != null && selected.ratioH != null && (
+          <span className="ratio-preview" style={{ width: Math.min(selected.ratioW * 4, 36), height: Math.min(selected.ratioH * 4, 36) }}></span>
+        )}
+        <span>{selected.label}</span>
+        <span className="dropdown-arrow">▾</span>
+      </div>
+      {open && (
+        <div className="dropdown-menu">
+          {options.map(o => (
+            <div key={o.value}
+              className={`dropdown-item ${o.value === value ? "dropdown-item--active" : ""}`}
+              onClick={() => { onChange(o.value); setOpen(false); }}>
+              {o.ratioW != null && o.ratioH != null && (
+                <span className="ratio-preview" style={{ width: Math.min(o.ratioW * 3, 24), height: Math.min(o.ratioH * 3, 24) }}></span>
+              )}
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
