@@ -370,18 +370,35 @@ function RatioPreview({ w, h }: { w: number; h: number }) {
   );
 }
 
-// ===== Stepper (duration picker) =====
+// ===== Stepper with slider popup =====
 function Stepper({ label, value, min, max, onChange, suffix }: {
   label: string; value: number; min: number; max: number; onChange: (v: number) => void; suffix: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function clickOut(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", clickOut);
+    return () => document.removeEventListener("mousedown", clickOut);
+  }, []);
+
   return (
-    <div className="control-group">
+    <div className="control-group stepper-wrap" ref={ref}>
       <span className="control-label">{label}</span>
-      <div className="stepper">
-        <button className="stepper__btn" onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min}>−</button>
+      <div className="stepper" onClick={() => setOpen(!open)}>
         <span className="stepper__val">{value}{suffix}</span>
-        <button className="stepper__btn" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max}>+</button>
+        <span className="dropdown-arrow" style={{ paddingRight: 4 }}>▾</span>
       </div>
+      {open && (
+        <div className="slider-popup">
+          <input type="range" className="slider-input" min={min} max={max} value={value}
+            onChange={e => onChange(Number(e.target.value))} />
+          <div className="slider-labels">
+            <span>{min}s</span>
+            <span>{max}s</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
