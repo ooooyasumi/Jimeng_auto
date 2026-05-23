@@ -421,8 +421,24 @@ body {
   cursor: pointer;
   transition: background 0.15s;
 }
-.uploaded-file:hover {
+.uploaded-file--ready:hover {
   background: rgba(0,202,224,0.18);
+}
+.uploaded-file--uploading {
+  cursor: default;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+}
+.uploaded-file__pct {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: 2px;
+}
+.upload-spinner {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) var(--pct, 0%), var(--bg-input) var(--pct, 0%));
+  flex-shrink: 0;
 }
 .uploaded-file__remove {
   cursor: pointer;
