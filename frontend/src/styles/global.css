@@ -623,7 +623,6 @@ body {
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
-  margin-left: auto;
 }
 .mode-hint span {
   padding: 1px 6px;
