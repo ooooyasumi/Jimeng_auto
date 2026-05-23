@@ -369,8 +369,12 @@ export default function MainPage() {
 
           <div className="bottom-bar__controls">
             <Dropdown label="模型" value={modelVersion} onChange={setModelVersion}
-              options={[{ value: "seedance2.0fast", label: "seedance2.0fast" }, { value: "seedance2.0", label: "seedance2.0" }]} />
-            <Stepper label="时长" value={duration} min={4} max={15} onChange={setDuration} suffix="s" />
+              options={[
+                { value: "seedance2.0fast", label: "Seedance 2.0 Fast", icon: "https://p26-dreamina-sign.byteimg.com/tos-cn-i-tb4s082cfz/sd20_avg~tplv-tb4s082cfz-image.image?lk3s=8e790bc3&x-expires=1811042195&x-signature=K%2BiRclxpFfQIvRfh8yJsCHgoP10%3D" },
+                { value: "seedance2.0", label: "Seedance 2.0", icon: "https://p26-dreamina-sign.byteimg.com/tos-cn-i-tb4s082cfz/sd20_avg~tplv-tb4s082cfz-image.image?lk3s=8e790bc3&x-expires=1811042195&x-signature=K%2BiRclxpFfQIvRfh8yJsCHgoP10%3D" },
+              ]} />
+            <Stepper label="时长" value={duration} min={4} max={15} onChange={setDuration} suffix="s"
+              icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>} />
             <Dropdown label="比例" value={ratio} onChange={setRatio}
               options={[
                 { value: "1:1", label: "1:1", ratioW: 1, ratioH: 1 },
@@ -403,8 +407,8 @@ function RatioPreview({ w, h }: { w: number; h: number }) {
 }
 
 // ===== Stepper with slider popup =====
-function Stepper({ label, value, min, max, onChange, suffix }: {
-  label: string; value: number; min: number; max: number; onChange: (v: number) => void; suffix: string;
+function Stepper({ label, value, min, max, onChange, suffix, icon }: {
+  label: string; value: number; min: number; max: number; onChange: (v: number) => void; suffix: string; icon?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -418,6 +422,7 @@ function Stepper({ label, value, min, max, onChange, suffix }: {
     <div className="control-group stepper-wrap" ref={ref}>
       <span className="control-label">{label}</span>
       <div className="stepper" onClick={() => setOpen(!open)}>
+        {icon && <span className="stepper__icon">{icon}</span>}
         <span className="stepper__val">{value}{suffix}</span>
         <span className="dropdown-arrow" style={{ paddingRight: 4 }}>▾</span>
       </div>
@@ -438,7 +443,7 @@ function Stepper({ label, value, min, max, onChange, suffix }: {
 // ===== Custom Dropdown =====
 function Dropdown({ label, value, onChange, options }: {
   label: string; value: string; onChange: (v: string) => void;
-  options: { value: string; label: string; ratioW?: number; ratioH?: number }[];
+  options: { value: string; label: string; ratioW?: number; ratioH?: number; icon?: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -454,6 +459,7 @@ function Dropdown({ label, value, onChange, options }: {
     <div className="control-group dropdown-wrap" ref={ref}>
       <span className="control-label">{label}</span>
       <div className={`dropdown-trigger ${open ? "dropdown-trigger--open" : ""}`} onClick={() => setOpen(!open)}>
+        {selected.icon && <img className="dropdown-icon" src={selected.icon} alt="" />}
         {selected.ratioW != null && selected.ratioH != null && (
           <RatioPreview w={selected.ratioW} h={selected.ratioH} />
         )}
@@ -466,6 +472,7 @@ function Dropdown({ label, value, onChange, options }: {
             <div key={o.value}
               className={`dropdown-item ${o.value === value ? "dropdown-item--active" : ""}`}
               onClick={() => { onChange(o.value); setOpen(false); }}>
+              {o.icon && <img className="dropdown-icon" src={o.icon} alt="" />}
               {o.ratioW != null && o.ratioH != null && (
                 <RatioPreview w={o.ratioW} h={o.ratioH} />
               )}
