@@ -348,43 +348,34 @@ export default function MainPage() {
             </div>
           )}
 
-          <div className="bottom-bar__input-row">
-            <div className="bottom-bar__prompt-wrapper">
-              <textarea ref={textareaRef} className="bottom-bar__prompt"
-                placeholder="描述你想生成的视频内容... 输入 @ 引用已上传文件，支持拖拽/粘贴上传"
-                rows={1} value={prompt} onChange={handlePromptChange}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && !e.shiftKey && !showMention) { e.preventDefault(); handleSubmit(); }
-                  if (e.key === "Escape" && showMention) setShowMention(false);
-                }} />
-              {showMention && (
-                <div className="mention-popup">
-                  {filteredMentions.length === 0 ? (
-                    <div className="mention-popup__empty">无匹配文件</div>
-                  ) : (filteredMentions.map((ref, i) => (
-                    <div key={i} className="mention-popup__item" onClick={() => insertMention(ref)}>
-                      <span className="mention-popup__icon">{refEmoji(ref.type)}</span>
-                      <span className="mention-popup__name">{ref.filename}</span>
-                      <span className="mention-popup__type">{ref.type.toUpperCase()}</span>
-                    </div>
-                  )))}
-                </div>
-              )}
-            </div>
-            <input ref={fileInputRef} type="file" style={{ display: "none" }} multiple accept="image/*,video/*,audio/*" onChange={handleFileInput} />
-            <div className="bottom-bar__upload" onClick={() => fileInputRef.current?.click()} title="上传参考文件（也支持拖拽/粘贴）">+</div>
-            {prompt.length > MAX_PROMPT_LENGTH * 0.8 && (
-              <span className={`prompt-counter ${prompt.length > MAX_PROMPT_LENGTH ? "prompt-counter--over" : ""}`}>
-                {prompt.length}/{MAX_PROMPT_LENGTH}
-              </span>
+          {/* Row 1: full-width textarea */}
+          <div className="bottom-bar__prompt-wrapper">
+            <textarea ref={textareaRef} className="bottom-bar__prompt"
+              placeholder="描述你想生成的视频内容... 输入 @ 引用已上传文件，支持拖拽/粘贴上传"
+              rows={1} value={prompt} onChange={handlePromptChange}
+              onKeyDown={e => {
+                if (e.key === "Enter" && !e.shiftKey && !showMention) { e.preventDefault(); handleSubmit(); }
+                if (e.key === "Escape" && showMention) setShowMention(false);
+              }} />
+            {showMention && (
+              <div className="mention-popup">
+                {filteredMentions.length === 0 ? (
+                  <div className="mention-popup__empty">无匹配文件</div>
+                ) : (filteredMentions.map((ref, i) => (
+                  <div key={i} className="mention-popup__item" onClick={() => insertMention(ref)}>
+                    <span className="mention-popup__icon">{refEmoji(ref.type)}</span>
+                    <span className="mention-popup__name">{ref.filename}</span>
+                    <span className="mention-popup__type">{ref.type.toUpperCase()}</span>
+                  </div>
+                )))}
+              </div>
             )}
-            <span className="cost-badge">✦ {estimatedCost}</span>
-            <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading || prompt.length > MAX_PROMPT_LENGTH}>
-              {isUploading ? `上传中 ${overallProgress}%` : submitting ? "提交中..." : "加入队列"}
-            </button>
           </div>
+          <input ref={fileInputRef} type="file" style={{ display: "none" }} multiple accept="image/*,video/*,audio/*" onChange={handleFileInput} />
 
+          {/* Row 2: all controls */}
           <div className="bottom-bar__controls">
+            <div className="bottom-bar__upload" onClick={() => fileInputRef.current?.click()} title="上传参考文件（也支持拖拽/粘贴）">+</div>
             <Dropdown label="模型" value={modelVersion} onChange={setModelVersion}
               options={[
                 { value: "seedance2.0fast", label: "Seedance 2.0 Fast", icon: "https://p26-dreamina-sign.byteimg.com/tos-cn-i-tb4s082cfz/sd20_avg~tplv-tb4s082cfz-image.image?lk3s=8e790bc3&x-expires=1811042195&x-signature=K%2BiRclxpFfQIvRfh8yJsCHgoP10%3D" },
@@ -401,6 +392,15 @@ export default function MainPage() {
                 { value: "9:16", label: "9:16", ratioW: 9, ratioH: 16 },
                 { value: "21:9", label: "21:9", ratioW: 21, ratioH: 9 },
               ]} />
+            {prompt.length > MAX_PROMPT_LENGTH * 0.8 && (
+              <span className={`prompt-counter ${prompt.length > MAX_PROMPT_LENGTH ? "prompt-counter--over" : ""}`}>
+                {prompt.length}/{MAX_PROMPT_LENGTH}
+              </span>
+            )}
+            <span className="cost-badge">✦ {estimatedCost}</span>
+            <button className="submit-btn" onClick={handleSubmit} disabled={submitting || !prompt.trim() || isUploading || prompt.length > MAX_PROMPT_LENGTH}>
+              {isUploading ? `上传中 ${overallProgress}%` : submitting ? "提交中..." : "加入队列"}
+            </button>
             <div className={`mode-hint ${(hasRefs || isUploading) ? "mode-hint--multimodal" : "mode-hint--text2video"}`}>模式: <span>{modeLabel}</span></div>
           </div>
         </div>
