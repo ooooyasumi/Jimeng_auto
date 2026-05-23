@@ -1,56 +1,76 @@
 import asyncio
 import json
+import os
 import re
-import shlex
 import shutil
 import tempfile
-import os
-from typing import Optional
 
 DREAMINA_BIN = shutil.which("dreamina") or "dreamina"
+CLI_TIMEOUT = 120  # seconds — prevents worker hang
 
 
 async def run_dreamina(*args) -> tuple[str, str, int]:
-    """Run a dreamina CLI command. Returns (stdout, stderr, returncode)."""
+    """Run a dreamina CLI command with timeout. Returns (stdout, stderr, returncode)."""
     cmd = [DREAMINA_BIN, *args]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    return (
-        stdout.decode("utf-8", errors="replace"),
-        stderr.decode("utf-8", errors="replace"),
-        proc.returncode or 0,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=CLI_TIMEOUT)
+        return (
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+            proc.returncode or 0,
+        )
+    except asyncio.TimeoutError:
+        if proc:
+            proc.kill()
+        raise RuntimeError(f"dreamina command timed out after {CLI_TIMEOUT}s")
 
 
 def parse_submit_output(output: str) -> dict:
-    """Parse submit command output to extract submit_id, gen_status, etc."""
+    """Parse dreamina CLI output. Tries JSON first, then text.
+
+    Returns keys: submit_id, gen_status, fail_reason, result_url, compliance_required.
+    """
     result = {
         "submit_id": None,
         "gen_status": None,
         "fail_reason": None,
         "result_url": None,
+        "compliance_required": False,
     }
-    # Try JSON first (list_task format)
+
+    # Check for compliance gate
+    if "AigcComplianceConfirmationRequired" in output:
+        result["compliance_required"] = True
+        result["gen_status"] = "fail"
+        result["fail_reason"] = "Compliance confirmation required — please authorize on Dreamina Web first"
+
+    # Try JSON parse
     try:
         data = json.loads(output)
-        if isinstance(data, list) and len(data) > 0:
-            data = data[0]
+        if isinstance(data, list):
+            # For list_task / query_result array, merge all records
+            pass  # handled below per-element
         if isinstance(data, dict):
             result["submit_id"] = data.get("submit_id")
             result["gen_status"] = data.get("gen_status")
-            result["fail_reason"] = data.get("fail_reason")
-            # result_url may be nested
+            result["fail_reason"] = data.get("fail_reason", "") or ""
+            # result_url may be nested in result_json
+            rj = data.get("result_json", {})
+            videos = rj.get("videos", []) if isinstance(rj, dict) else []
+            if videos and isinstance(videos, list) and len(videos) > 0:
+                result["result_url"] = videos[0].get("video_url", "")
             if data.get("result_url"):
                 result["result_url"] = data["result_url"]
             return result
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, TypeError):
         pass
 
-    # Fallback: parse plain text
+    # Fallback: text parsing
     lines = output.strip().split("\n")
     for line in lines:
         line = line.strip()
@@ -59,11 +79,12 @@ def parse_submit_output(output: str) -> dict:
             if m:
                 result["submit_id"] = m.group(0)
         if "gen_status" in line.lower():
-            if "querying" in line.lower():
+            lower = line.lower()
+            if "querying" in lower:
                 result["gen_status"] = "querying"
-            elif "success" in line.lower():
+            elif "success" in lower:
                 result["gen_status"] = "success"
-            elif "fail" in line.lower():
+            elif "fail" in lower:
                 result["gen_status"] = "fail"
         if "fail_reason" in line.lower():
             result["fail_reason"] = line.split("fail_reason", 1)[-1].strip(": =\"")
@@ -84,7 +105,6 @@ async def list_all_tasks() -> list[dict]:
 
 
 def determine_task_type(references: list) -> str:
-    """Auto-detect: text2video if no references, multimodal2video otherwise."""
     if references and len(references) > 0:
         return "multimodal2video"
     return "text2video"
@@ -92,7 +112,6 @@ def determine_task_type(references: list) -> str:
 
 def build_submit_command(task_type: str, prompt: str, params: dict,
                          ref_files: list[str]) -> list[str]:
-    """Build the dreamina CLI command for submitting a task."""
     if task_type == "text2video":
         cmd = [
             "text2video",

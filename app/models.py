@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
+
+VALID_RATIOS = {"1:1", "3:4", "4:3", "16:9", "9:16", "21:9"}
+VALID_MODELS = {"seedance2.0fast", "seedance2.0"}
 
 
 class Reference(BaseModel):
@@ -12,14 +15,14 @@ class Reference(BaseModel):
 
 
 class TaskParams(BaseModel):
-    duration: int = 5
+    duration: int = Field(default=5, ge=4, le=15)
     ratio: str = "16:9"
     model_version: str = "seedance2.0fast"
 
 
 class TaskCreate(BaseModel):
-    prompt: str
-    duration: int = 5
+    prompt: str = Field(..., min_length=1)
+    duration: int = Field(default=5, ge=4, le=15)
     ratio: str = "16:9"
     model_version: str = "seedance2.0fast"
     references: List[Reference] = []

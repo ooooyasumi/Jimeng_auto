@@ -162,7 +162,7 @@ export default function MainPage() {
     document.addEventListener("dragenter", enter); document.addEventListener("dragleave", leave);
     document.addEventListener("dragover", over); document.addEventListener("drop", drop);
     return () => { document.removeEventListener("dragenter", enter); document.removeEventListener("dragleave", leave); document.removeEventListener("dragover", over); document.removeEventListener("drop", drop); };
-  }, [refs, uploading]);
+  }, []); // eslint-disable-line
 
   // ===== Upload with XHR progress =====
   async function startUploads(files: FileList | File[]) {
@@ -239,9 +239,14 @@ export default function MainPage() {
     const textBefore = prompt.slice(0, cursorPos);
     const textAfter = prompt.slice(cursorPos);
     const atIdx = textBefore.lastIndexOf("@");
-    setPrompt(textBefore.slice(0, atIdx) + ref.filename + " " + textAfter);
+    const newPrompt = textBefore.slice(0, atIdx) + ref.filename + " " + textAfter;
+    setPrompt(newPrompt);
     setShowMention(false);
-    textareaRef.current?.focus();
+    const newCursor = (textBefore.slice(0, atIdx) + ref.filename + " ").length;
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(newCursor, newCursor);
+    }, 0);
   }
 
   const filteredMentions = mentionFilter
@@ -299,7 +304,7 @@ export default function MainPage() {
   const sortedDone = tasks.filter(t => t.status === "done" || t.status === "failed").sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   // orderedPending is defined above with drag-insertion logic
 
-  function formatTime(ts: string) { const d = new Date(ts + "Z"); const diff = Date.now() - d.getTime(); const m = Math.floor(diff / 60000); if (m < 1) return "刚刚"; if (m < 60) return `${m} 分钟前`; const h = Math.floor(m / 60); if (h < 24) return `${h} 小时前`; return `${Math.floor(h / 24)} 天前`; }
+  function formatTime(ts: string) { const d = new Date(ts.replace(" ", "T") + "Z"); const diff = Date.now() - d.getTime(); const m = Math.floor(diff / 60000); if (m < 1) return "刚刚"; if (m < 60) return `${m} 分钟前`; const h = Math.floor(m / 60); if (h < 24) return `${h} 小时前`; return `${Math.floor(h / 24)} 天前`; }
   function refEmoji(type: string) { switch (type) { case "image": return "🖼"; case "video": return "🎬"; case "audio": return "🎵"; default: return "?"; } }
 
   // Upload progress percentage across all uploading files
