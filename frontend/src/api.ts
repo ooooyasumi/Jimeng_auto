@@ -68,6 +68,7 @@ export interface Task {
   params: TaskParams;
   references: Reference[];
   submit_id: string | null;
+  submitted_at: string | null;
   result_url: string | null;
   gen_status: string | null;
   error_message: string | null;
@@ -135,6 +136,16 @@ export async function resumeQueue(): Promise<void> {
 
 export async function fetchCredit(): Promise<{ total_credit: number }> {
   return request("/queue/credit");
+}
+
+export interface HealthStatus {
+  ok: boolean;
+  cli_installed: boolean;
+  login_status: string;
+}
+
+export async function fetchHealth(): Promise<HealthStatus> {
+  return request("/system/health");
 }
 
 export async function getPresignedUpload(filename: string): Promise<{

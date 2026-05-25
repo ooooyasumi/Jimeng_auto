@@ -3,15 +3,15 @@ import uuid
 from datetime import datetime
 from qcloud_cos import CosConfig, CosS3Client
 
-REGION = os.environ.get("COS_REGION", "ap-chongqing")
-BUCKET = "jimengauto-1372876299"
-CUSTOM_DOMAIN = os.environ.get("COS_CUSTOM_DOMAIN", "jimengauto.cos.ooooyasumi.com")
+REGION = os.environ.get("COS_REGION", "")
+BUCKET = os.environ.get("COS_BUCKET", "")
+CUSTOM_DOMAIN = os.environ.get("COS_CUSTOM_DOMAIN", "")
 SECRET_ID = os.environ.get("COS_SECRET_ID", "")
 SECRET_KEY = os.environ.get("COS_SECRET_KEY", "")
 
 
 def _client() -> CosS3Client | None:
-    if not all([SECRET_ID, SECRET_KEY]):
+    if not all([SECRET_ID, SECRET_KEY, BUCKET, REGION]):
         return None
     config = CosConfig(Region=REGION, SecretId=SECRET_ID, SecretKey=SECRET_KEY)
     return CosS3Client(config)

@@ -26,6 +26,7 @@ def init_db():
             params          TEXT NOT NULL DEFAULT '{}',
             refs            TEXT NOT NULL DEFAULT '[]',
             submit_id       TEXT,
+            submitted_at    TIMESTAMP,
             result_url      TEXT,
             gen_status      TEXT,
             error_message   TEXT,
@@ -44,5 +45,9 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_tasks_position ON tasks(position);
         CREATE INDEX IF NOT EXISTS idx_tasks_submit_id ON tasks(submit_id);
     """)
+    # Migration: add submitted_at column if missing
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    if "submitted_at" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN submitted_at TIMESTAMP")
     conn.commit()
     conn.close()

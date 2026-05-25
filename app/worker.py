@@ -31,10 +31,10 @@ def set_worker_paused(paused: bool):
     _paused = paused
 
 
-async def submit_task_to_dreamina(task) -> str | None:
-    """Submit a task to dreamina CLI. Returns full submit_id or None on failure."""
+async def submit_task_to_dreamina(task) -> tuple[str | None, str]:
+    """Submit a task to dreamina CLI. Returns (submit_id, error_msg)."""
     params = json.loads(task["params"] or "{}")
-    refs = json.loads(task["references"] or "[]")
+    refs = json.loads(task["refs"] or "[]")
     tmp_dir = None
     ref_files = []
     try:
@@ -59,24 +59,23 @@ async def submit_task_to_dreamina(task) -> str | None:
         result = parse_submit_output(combined)
 
         if result["compliance_required"]:
-            logger.error(f"Task {task['id']}: AigcComplianceConfirmationRequired")
-            raise RuntimeError("Compliance confirmation required — authorize on Dreamina Web first")
+            msg = "Compliance confirmation required — authorize on Dreamina Web first"
+            logger.error(f"Task {task['id']}: {msg}")
+            return None, msg
 
         submit_id = result.get("submit_id")
         if result.get("gen_status") == "fail" and result.get("fail_reason"):
             reason = result["fail_reason"]
             logger.error(f"Task {task['id']} submit rejected: {reason}")
-            raise RuntimeError(reason)
+            return None, reason
 
         if not submit_id:
-            raise RuntimeError("No submit_id in output")
+            return None, "No submit_id in output"
 
-        return submit_id
+        return submit_id, ""
     except Exception as e:
         logger.error(f"Submit failed for task {task['id']}: {e}")
-        # Store the real failure reason so it appears in the DB
-        task["_submit_error"] = str(e)
-        return None
+        return None, str(e)
     finally:
         if tmp_dir and os.path.isdir(tmp_dir):
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -108,8 +107,10 @@ async def sync_running_task(task) -> bool:
 
     result = await check_task_via_query(submit_id)
     if result is None:
-        # Count consecutive "not found" retries
-        not_found_count = int(task.get("_nf_retries") or 0) + 1
+        # Parse retry count from gen_status (e.g. "querying:3")
+        gs_raw = task["gen_status"] or "querying"
+        parts = gs_raw.split(":")
+        not_found_count = int(parts[1]) + 1 if len(parts) > 1 and parts[1].isdigit() else 1
         if not_found_count >= MAX_QUERY_NOT_FOUND_RETRIES:
             db = get_db()
             try:
@@ -122,8 +123,16 @@ async def sync_running_task(task) -> bool:
                 db.close()
             logger.error(f"Task {task['id']} record not found after {not_found_count} retries, marking failed")
             return True
-        # Track retry count in-memory on the task dict (not persisted)
-        task["_nf_retries"] = not_found_count
+        # Persist retry count in gen_status field
+        db = get_db()
+        try:
+            db.execute(
+                "UPDATE tasks SET gen_status=?, updated_at=datetime('now') WHERE id=?",
+                (f"querying:{not_found_count}", task["id"])
+            )
+            db.commit()
+        finally:
+            db.close()
         logger.warning(f"Task {task['id']} record not found (retry {not_found_count}/{MAX_QUERY_NOT_FOUND_RETRIES})")
         return False
 
@@ -189,29 +198,28 @@ async def queue_worker():
 
                 if next_task:
                     if next_task["submit_id"]:
-                        # Already submitted, move to running
+                        # Already submitted, move to running (preserve existing submitted_at)
                         db.execute(
-                            "UPDATE tasks SET status='running', gen_status='querying', updated_at=datetime('now') WHERE id=?",
+                            "UPDATE tasks SET status='running', gen_status='querying', submitted_at=COALESCE(submitted_at, datetime('now')), updated_at=datetime('now') WHERE id=?",
                             (next_task["id"],)
                         )
                         db.commit()
                         logger.info(f"Task {next_task['id']} already submitted, moved to running")
                     else:
                         # Submit now
-                        submit_id = await submit_task_to_dreamina(dict(next_task))
+                        submit_id, error_msg = await submit_task_to_dreamina(dict(next_task))
                         if submit_id:
                             db.execute(
                                 """UPDATE tasks SET status='running', submit_id=?,
-                                   gen_status='querying', updated_at=datetime('now') WHERE id=?""",
+                                   gen_status='querying', submitted_at=datetime('now'), updated_at=datetime('now') WHERE id=?""",
                                 (submit_id, next_task["id"])
                             )
                             db.commit()
                             logger.info(f"Task {next_task['id']} submitted: {submit_id}")
                         else:
-                            error_msg = getattr(next_task, '_submit_error', None) or "Submit failed"
                             db.execute(
                                 "UPDATE tasks SET status='failed', error_message=?, updated_at=datetime('now') WHERE id=?",
-                                (str(error_msg), next_task["id"])
+                                (error_msg or "Submit failed", next_task["id"])
                             )
                             db.commit()
                             logger.error(f"Task {next_task['id']} submit failed: {error_msg}")

@@ -134,3 +134,17 @@ def build_submit_command(task_type: str, prompt: str, params: dict,
             elif ext in (".mp3", ".wav", ".aac", ".m4a", ".ogg"):
                 cmd += ["--audio", ref]
     return cmd
+
+
+async def check_cli_health() -> dict:
+    """Check CLI installation and login status."""
+    installed = shutil.which("dreamina") is not None
+    if not installed:
+        return {"ok": False, "cli_installed": False, "login_status": "not_logged_in"}
+    try:
+        _, _, rc = await run_dreamina("user_credit")
+        if rc == 0:
+            return {"ok": True, "cli_installed": True, "login_status": "logged_in"}
+        return {"ok": False, "cli_installed": True, "login_status": "not_logged_in"}
+    except Exception:
+        return {"ok": False, "cli_installed": True, "login_status": "error"}

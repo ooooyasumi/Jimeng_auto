@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import shutil
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -24,6 +23,7 @@ from app.database import init_db
 from app.auth import verify_token, set_initial_password
 from app.router import auth, tasks, upload, queue
 from app.worker import queue_worker
+from app.dreamina import check_cli_health
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,12 +88,8 @@ app.include_router(queue.router)
 
 
 @app.get("/api/system/health")
-def health():
-    return {
-        "ok": True,
-        "cli_installed": shutil.which("dreamina") is not None,
-        "login_status": "unknown",
-    }
+async def health():
+    return await check_cli_health()
 
 
 if os.path.isdir(FRONTEND_DIR):

@@ -23,7 +23,8 @@ def row_to_task(row) -> TaskResponse:
         prompt=row["prompt"],
         params=TaskParams(**params) if params else TaskParams(),
         references=[Reference(**r) for r in refs],
-        submit_id=row["submit_id"], result_url=row["result_url"],
+        submit_id=row["submit_id"], submitted_at=row["submitted_at"],
+        result_url=row["result_url"],
         gen_status=row["gen_status"], error_message=row["error_message"],
         position=row["position"], session_id=row["session_id"] or 0,
         created_at=row["created_at"], updated_at=row["updated_at"],
@@ -139,8 +140,9 @@ def update_task(task_id: int, req: TaskUpdate):
             updates["refs"] = json.dumps([r.model_dump() for r in req.references], ensure_ascii=False)
 
         if updates:
-            updates["updated_at"] = "datetime('now')"
-            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            set_parts = [f"{k} = ?" for k in updates]
+            set_parts.append("updated_at = datetime('now')")
+            set_clause = ", ".join(set_parts)
             vals = list(updates.values())
             vals.append(task_id)
             db.execute(f"UPDATE tasks SET {set_clause} WHERE id = ?", vals)
