@@ -48,6 +48,7 @@ class TaskResponse(BaseModel):
     params: TaskParams
     references: List[Reference]
     submit_id: Optional[str] = None
+    submitted_at: Optional[str] = None
     result_url: Optional[str] = None
     gen_status: Optional[str] = None
     error_message: Optional[str] = None

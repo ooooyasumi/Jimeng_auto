@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  fetchTasks, fetchQueueStatus, fetchCredit,
+  fetchTasks, fetchQueueStatus, fetchCredit, fetchHealth,
   deleteTask, reorderTask, pauseQueue, resumeQueue,
   createTask, getPresignedUpload, proxyUpload,
 } from "../api";
-import type { Task, QueueStatus, Reference } from "../api";
+import type { Task, QueueStatus, Reference, HealthStatus } from "../api";
 
 const REFRESH_INTERVAL = 15;
 
@@ -93,14 +93,9 @@ export default function MainPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [credit, setCredit] = useState<number | null>(null);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
   const [refs, setRefs] = useState<Reference[]>([]);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [dragId, setDragId] = useState<number | null>(null);
-  const [dragOverId, setDragOverId] = useState<number | null>(null);
-  // Local pending order for instant visual feedback on drop
-  const [pendingOrder, setPendingOrder] = useState<number[]>([]);
-
-  // Upload progress: filename -> {file, progress}
   const [uploading, setUploading] = useState<Map<string, UploadEntry>>(new Map());
 
   const [prompt, setPrompt] = useState("");
@@ -114,10 +109,23 @@ export default function MainPage() {
   const [previewRef, setPreviewRef] = useState<Reference | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [refreshState, setRefreshState] = useState<"idle" | "loading" | "done">("idle");
+  const [showAllDone, setShowAllDone] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomBarRef = useRef<HTMLDivElement>(null);
+  const startUploadsRef = useRef<(files: FileList | File[]) => void>(() => {});
+
+  // ===== Drag state (all refs, no stale closures) =====
+  const [pendingOrder, setPendingOrder] = useState<number[]>([]);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const dragIdRef = useRef<number | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; source: "mouse" | "touch" } | null>(null);
+  const mousePosRef = useRef({ x: 0, y: 0 });
+  const dropIdxRef = useRef<number | null>(null);
+  const pendingIdsRef = useRef<number[]>([]);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [, forceRender] = useState(0);
 
   const hasRefs = refs.length > 0;
   const isUploading = uploading.size > 0;
@@ -148,6 +156,14 @@ export default function MainPage() {
   }, []);
 
   useEffect(() => { refresh(); const t = setInterval(refresh, REFRESH_INTERVAL * 1000); return () => clearInterval(t); }, [refresh]);
+
+  // Health check (60s interval, slower than task refresh)
+  useEffect(() => {
+    const check = () => fetchHealth().then(setHealth).catch(() => {});
+    check();
+    const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, []);
   useEffect(() => { localStorage.setItem("jimeng_model", modelVersion); }, [modelVersion]);
   useEffect(() => { localStorage.setItem("jimeng_duration", String(duration)); }, [duration]);
   useEffect(() => { localStorage.setItem("jimeng_ratio", ratio); }, [ratio]);
@@ -158,7 +174,7 @@ export default function MainPage() {
     const enter = (e: DragEvent) => { e.preventDefault(); c++; if (e.dataTransfer?.types.includes("Files")) document.body.classList.add("body--drag-over"); };
     const leave = () => { c--; if (c <= 0) { c = 0; document.body.classList.remove("body--drag-over"); } };
     const over = (e: DragEvent) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; };
-    const drop = (e: DragEvent) => { e.preventDefault(); c = 0; document.body.classList.remove("body--drag-over"); if (e.dataTransfer?.files?.length) startUploads(e.dataTransfer.files); };
+    const drop = (e: DragEvent) => { e.preventDefault(); c = 0; document.body.classList.remove("body--drag-over"); if (e.dataTransfer?.files?.length) startUploadsRef.current(e.dataTransfer.files); };
     document.addEventListener("dragenter", enter); document.addEventListener("dragleave", leave);
     document.addEventListener("dragover", over); document.addEventListener("drop", drop);
     return () => { document.removeEventListener("dragenter", enter); document.removeEventListener("dragleave", leave); document.removeEventListener("dragover", over); document.removeEventListener("drop", drop); };
@@ -179,6 +195,7 @@ export default function MainPage() {
       doUpload(file);
     }
   }
+  startUploadsRef.current = startUploads;
 
   async function doUpload(file: File) {
     try {
@@ -269,40 +286,128 @@ export default function MainPage() {
   async function handleReorder(id: number, pos: number) { try { await reorderTask(id, pos); refresh(); } catch (e: any) { showToast(e.message); } }
   async function handlePauseResume() { try { queueStatus?.paused ? await resumeQueue() : await pauseQueue(); refresh(); } catch (e: any) { showToast(e.message); } }
 
-  // Drag: visual feedback via CSS classes only, no list reorder during drag
-  function handleDragStart(e: React.DragEvent, taskId: number) { setDragId(taskId); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(taskId)); }
-  function handleDragEnd() { setDragId(null); setDragOverId(null); }
-  function handleDragOver(e: React.DragEvent, taskId: number) {
-    e.preventDefault(); e.dataTransfer.dropEffect = "move";
-    if (dragId && dragId !== taskId) setDragOverId(taskId);
-  }
-  function handleDragLeave(_e: React.DragEvent, taskId: number) {
-    if (dragOverId === taskId) setDragOverId(null);
-  }
-  function handleDrop(e: React.DragEvent, targetTask: Task) {
-    e.preventDefault(); setDragId(null); setDragOverId(null);
-    const dId = Number(e.dataTransfer.getData("text/plain"));
-    if (!dId || dId === targetTask.id) return;
-    // Instant local swap for visual feedback
-    const ids = pendingOrder.length > 0 ? [...pendingOrder] : pendingTasksBase.map(t => t.id);
-    const fromIdx = ids.indexOf(dId);
-    const toIdx = ids.indexOf(targetTask.id);
-    if (fromIdx !== -1 && toIdx !== -1) {
-      ids.splice(fromIdx, 1); ids.splice(toIdx, 0, dId); setPendingOrder(ids);
-    }
-    handleReorder(dId, targetTask.position).finally(() => refresh());
+  // Base pending order from server
+  const pendingTasksBase = tasks.filter(t => t.status === "pending").sort((a, b) => a.position - b.position);
+
+  // Keep ref in sync for event handlers
+  useEffect(() => {
+    pendingIdsRef.current = pendingOrder.length > 0 ? [...pendingOrder] : pendingTasksBase.map(t => t.id);
+  }, [pendingOrder, pendingTasksBase]);
+
+  // ===== Drag and drop (custom hook, all refs) =====
+  function activateDrag(taskId: number, x: number, y: number, source: "mouse" | "touch") {
+    dragIdRef.current = taskId;
+    dragStartRef.current = { x, y, source };
+    mousePosRef.current = { x, y };
   }
 
-  // Base pending order from server, overridden by local pendingOrder if set
-  const pendingTasksBase = tasks.filter(t => t.status === "pending").sort((a, b) => a.position - b.position);
+  function handleCardMouseDown(e: React.MouseEvent, taskId: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    activateDrag(taskId, e.clientX, e.clientY, "mouse");
+  }
+
+  function handleCardTouchStart(e: React.TouchEvent, taskId: number) {
+    const t = e.touches[0];
+    activateDrag(taskId, t.clientX, t.clientY, "touch");
+    longPressRef.current = setTimeout(() => forceRender(n => n + 1), 250);
+  }
+
+  function handleCardTouchEnd() {
+    clearTimeout(longPressRef.current as unknown as number); longPressRef.current = null;
+    dragIdRef.current !== null && dropIdxRef.current !== null ? commitDrop() : cancelDrag();
+  }
+
+  function handleCardTouchMove(e: React.TouchEvent) {
+    if (dragIdRef.current === null) return;
+    e.preventDefault();
+    moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+  }
+
+  // Global mouse handlers (registered once, read refs at call time)
+  function onGlobalMouseMove(e: MouseEvent) {
+    const s = dragStartRef.current;
+    if (!s) return;
+    // Activate drag on mouse move threshold
+    if (dragIdRef.current === null && s.source === "mouse") {
+      if (Math.abs(e.clientY - s.y) > 5) {
+        forceRender(n => n + 1);
+      }
+      return;
+    }
+    if (dragIdRef.current !== null) {
+      e.preventDefault();
+      moveDrag(e.clientX, e.clientY);
+    }
+  }
+
+  function onGlobalMouseUp() {
+    clearTimeout(longPressRef.current as unknown as number); longPressRef.current = null;
+    dragIdRef.current !== null && dropIdxRef.current !== null ? commitDrop() : cancelDrag();
+  }
+
+  useEffect(() => {
+    document.addEventListener("mousemove", onGlobalMouseMove);
+    document.addEventListener("mouseup", onGlobalMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onGlobalMouseMove);
+      document.removeEventListener("mouseup", onGlobalMouseUp);
+    };
+  }, []); // eslint-disable-line
+
+  function moveDrag(x: number, y: number) {
+    mousePosRef.current = { x, y };
+    // Find card under cursor
+    const el = document.elementsFromPoint(x, y).find(e => (e as HTMLElement).closest?.("[data-task-id]"));
+    const card = (el as HTMLElement)?.closest?.("[data-task-id]") as HTMLElement | null;
+    if (!card) { dropIdxRef.current = null; forceRender(n => n + 1); return; }
+    const targetId = Number(card.dataset.taskId);
+    const ids = pendingIdsRef.current;
+    const idx = ids.indexOf(targetId);
+    if (idx === -1) { dropIdxRef.current = null; forceRender(n => n + 1); return; }
+    const rect = card.getBoundingClientRect();
+    dropIdxRef.current = y < rect.top + rect.height / 2 ? idx : idx + 1;
+    forceRender(n => n + 1);
+  }
+
+  function commitDrop() {
+    const draggedId = dragIdRef.current!;
+    const insertIdx = dropIdxRef.current!;
+    const ids = [...pendingIdsRef.current];
+    const removeIdx = ids.indexOf(draggedId);
+    if (removeIdx === -1) { cancelDrag(); return; }
+    const targetIdx = insertIdx > removeIdx ? insertIdx - 1 : insertIdx;
+    ids.splice(removeIdx, 1);
+    ids.splice(targetIdx, 0, draggedId);
+    setPendingOrder(ids);
+    cancelDrag();
+    handleReorder(draggedId, targetIdx);
+  }
+
+  function cancelDrag() {
+    dragIdRef.current = null;
+    dragStartRef.current = null;
+    dropIdxRef.current = null;
+    if (longPressRef.current) { clearTimeout(longPressRef.current as unknown as number); longPressRef.current = null; }
+    forceRender(n => n + 1);
+  }
+
+  // Derived drag state for rendering
+  const dragId = dragIdRef.current;
+  const dropIdx = dropIdxRef.current;
+  const isDragging = dragId !== null && (dragStartRef.current?.source === "touch" || dropIdx !== null);
+
+  // Ordered pending tasks (always original order, no live reorder during drag)
   const orderedPending = (() => {
     if (pendingOrder.length === 0) return pendingTasksBase;
     const map = new Map(pendingTasksBase.map(t => [t.id, t]));
     return pendingOrder.map(id => map.get(id)).filter(Boolean) as Task[];
   })();
 
+  // Dragged task for the floating card
+  const draggedTask = dragId ? orderedPending.find(t => t.id === dragId) : null;
+
   const sortedDone = tasks.filter(t => t.status === "done" || t.status === "failed").sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  // orderedPending is defined above with drag-insertion logic
 
   function formatTime(ts: string) { const d = new Date(ts.replace(" ", "T") + "Z"); const diff = Date.now() - d.getTime(); const m = Math.floor(diff / 60000); if (m < 1) return "刚刚"; if (m < 60) return `${m} 分钟前`; const h = Math.floor(m / 60); if (h < 24) return `${h} 小时前`; return `${Math.floor(h / 24)} 天前`; }
   function refEmoji(type: string) { switch (type) { case "image": return "🖼"; case "video": return "🎬"; case "audio": return "🎵"; default: return "?"; } }
@@ -339,22 +444,65 @@ export default function MainPage() {
         </div>
       </div>
 
-      <div className="main">
+      {/* Health status banner */}
+      {health && !health.ok && (
+        <div className={`status-banner ${health.cli_installed ? "status-banner--warning" : "status-banner--error"}`}>
+          {!health.cli_installed
+            ? "即梦 CLI 未安装，请先安装 dreamina 命令行工具"
+            : health.login_status === "not_logged_in"
+              ? "即梦未登录，请在终端运行 dreamina login"
+              : "即梦 CLI 连接异常，请检查网络或重新登录"}
+        </div>
+      )}
+
+      {/* Floating card that follows mouse during drag */}
+      {isDragging && draggedTask && (
+        <div className="drag-floating-card" style={{ left: mousePosRef.current.x, top: mousePosRef.current.y }}>
+          <TaskCard task={draggedTask} isPending formatTime={formatTime} />
+        </div>
+      )}
+
+      {/* All done tasks modal */}
+      {showAllDone && (
+        <div className="preview-overlay" onClick={() => setShowAllDone(false)}>
+          <div className="done-modal" onClick={e => e.stopPropagation()}>
+            <div className="preview-modal__header">
+              <span className="preview-modal__title">全部已完成任务 ({sortedDone.length})</span>
+              <button className="preview-modal__close" onClick={() => setShowAllDone(false)}>×</button>
+            </div>
+            <div className="done-modal__body">
+              {sortedDone.map(t => <TaskCard key={t.id} task={t} formatTime={formatTime} />)}
+              {sortedDone.length === 0 && <div className="empty-state">暂无已完成任务</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="main" ref={mainRef}>
         <div className="main__inner container">
           <div className="section-header">生成中 / 已完成<span className="section-header__line"></span></div>
           {queueStatus?.running && <TaskCard task={queueStatus.running} isActive formatTime={formatTime} />}
-          {sortedDone.map(t => <TaskCard key={t.id} task={t} formatTime={formatTime} />)}
+          {sortedDone.slice(0, queueStatus?.running ? 2 : 3).map(t => <TaskCard key={t.id} task={t} formatTime={formatTime} />)}
           {!queueStatus?.running && sortedDone.length === 0 && <div className="empty-state">暂无任务，在下方输入 prompt 开始</div>}
+          {sortedDone.length > (queueStatus?.running ? 2 : 3) && (
+            <button className="view-more-btn" onClick={() => setShowAllDone(true)}>查看更多 ({sortedDone.length - (queueStatus?.running ? 2 : 3)} 条)</button>
+          )}
 
           <div className="section-header" style={{ marginTop: 8 }}>
             排队中 ({orderedPending.length})<span className="section-header__line"></span>
             <button className="topbar__btn" onClick={handlePauseResume} style={{ fontSize: 11, marginLeft: "auto" }}>{queueStatus?.paused ? "▶ 恢复队列" : "⏸ 暂停队列"}</button>
           </div>
-          {orderedPending.map(t => (
-            <TaskCard key={t.id} task={t} isPending draggable isDragging={dragId === t.id} isDragOver={dragOverId === t.id}
-              formatTime={formatTime}
-              onDelete={handleDelete} onDragStart={handleDragStart} onDragEnd={handleDragEnd}
-              onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} />
+          {orderedPending.map((t, i) => (
+            <div key={t.id} data-task-id={t.id} style={{ position: "relative" }}>
+              {dropIdx === i && <div className="drag-insert-line" />}
+              <TaskCard task={t} isPending isDragging={dragId === t.id}
+                formatTime={formatTime}
+                onDelete={handleDelete}
+                onMouseDown={handleCardMouseDown}
+                onTouchStart={handleCardTouchStart}
+                onTouchEnd={handleCardTouchEnd}
+                onTouchMove={handleCardTouchMove} />
+            </div>
           ))}
           {orderedPending.length === 0 && <div className="empty-state">队列为空，添加任务开始排队</div>}
           <div style={{ minHeight: 12 }}></div>
@@ -590,34 +738,50 @@ function FilePreview({ refData, onClose }: { refData: Reference; onClose: () => 
 
 // ===== Task Card =====
 function TaskCard({
-  task, isActive = false, isPending = false, draggable = false,
-  isDragging = false, isDragOver = false,
-  formatTime, onDelete, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
+  task, isActive = false, isPending = false,
+  isDragging = false,
+  formatTime, onDelete, onMouseDown, onTouchStart, onTouchEnd, onTouchMove,
 }: {
-  task: Task; isActive?: boolean; isPending?: boolean; draggable?: boolean;
-  isDragging?: boolean; isDragOver?: boolean;
+  task: Task; isActive?: boolean; isPending?: boolean;
+  isDragging?: boolean;
   formatTime: (ts: string) => string;
   onDelete?: (id: number) => void;
-  onDragStart?: (e: React.DragEvent, taskId: number) => void; onDragEnd?: (e: React.DragEvent) => void;
-  onDragOver?: (e: React.DragEvent, taskId: number) => void; onDragLeave?: (e: React.DragEvent, taskId: number) => void;
-  onDrop?: (e: React.DragEvent, task: Task) => void;
+  onMouseDown?: (e: React.MouseEvent, taskId: number) => void;
+  onTouchStart?: (e: React.TouchEvent, taskId: number) => void;
+  onTouchEnd?: (e: React.TouchEvent) => void;
+  onTouchMove?: (e: React.TouchEvent) => void;
 }) {
   const sc = task.status === "running" ? "status-badge--running" : task.status === "done" ? "status-badge--done" : task.status === "failed" ? "status-badge--failed" : "status-badge--pending";
   const sl = task.status === "running" ? "生成中" : task.status === "done" ? "已完成" : task.status === "failed" ? "失败" : `队列 #${task.position + 1}`;
   const tl = task.type === "text2video" ? "文生视频" : "全能参考";
 
+  // Elapsed timer for running tasks
+  const [elapsed, setElapsed] = useState(0);
+  const submitTime = task.submitted_at;
+  useEffect(() => {
+    if (!isActive || !submitTime) return;
+    const started = new Date(submitTime.replace(" ", "T") + "Z").getTime();
+    const tick = () => setElapsed(Math.floor((Date.now() - started) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isActive, submitTime]);
+  const elapsedLabel = isActive && submitTime ? `${Math.floor(elapsed / 60)}分${(elapsed % 60).toString().padStart(2, "0")}秒` : "";
+  const submitTimeLabel = isActive && submitTime
+    ? new Date(submitTime.replace(" ", "T") + "Z").toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Shanghai" }) + " 提交"
+    : "";
+
   return (
-    <div className={`task-card ${isActive ? "task-card--active" : ""} ${isPending ? "task-card--pending" : ""} ${isDragging ? "task-card--dragging" : ""} ${isDragOver ? "task-card--drag-over" : ""}`}
-      draggable={draggable}
-      onDragStart={draggable ? (e) => onDragStart?.(e, task.id) : undefined}
-      onDragEnd={draggable ? (e) => onDragEnd?.(e) : undefined}
-      onDragOver={draggable ? (e) => onDragOver?.(e, task.id) : undefined}
-      onDragLeave={draggable ? (e) => onDragLeave?.(e, task.id) : undefined}
-      onDrop={draggable ? (e) => onDrop?.(e, task) : undefined}>
+    <div className={`task-card ${isActive ? "task-card--active" : ""} ${isPending ? "task-card--pending" : ""} ${isDragging ? "task-card--dragging" : ""}`}
+      onMouseDown={isPending ? (e) => onMouseDown?.(e, task.id) : undefined}
+      onTouchStart={isPending ? (e) => onTouchStart?.(e, task.id) : undefined}
+      onTouchEnd={isPending ? onTouchEnd : undefined}
+      onTouchMove={isPending ? onTouchMove : undefined}>
       <div className="task-card__header">
         <span className={`status-badge ${sc}`}><span className={`status-dot ${task.status === "running" ? "status-dot--running" : ""}`}></span>{sl}</span>
         {isPending && <span className="task-card__drag-hint" title="长按拖拽排序">⠿</span>}
-        <span className="task-card__time">{formatTime(task.created_at)}</span>
+        <span className="task-card__time">{isActive ? submitTimeLabel : formatTime(task.created_at)}</span>
+        {elapsedLabel && <span className="task-card__elapsed">{elapsedLabel}</span>}
         <span className="task-card__cost">{isPending ? "预计 " : ""}-{calcTaskCost(task.params.duration, task.params.model_version, task.references || [])} 积分</span>
         {task.status === "done" && task.result_url && <a className="task-card__link" href={task.result_url} target="_blank" rel="noopener noreferrer">↗ 在即梦查看</a>}
         {isPending && <div className="task-card__actions"><button className="task-card__action-btn task-card__action-btn--danger" onClick={() => onDelete?.(task.id)}>删除</button></div>}
